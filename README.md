@@ -1,6 +1,6 @@
-# van-cli (TypeScript)
+# van-cli
 
-CLI wrapper for the NGP VAN API.
+A CLI wrapper for the NGP VAN API for human 🧬 and agentic 🤖 use. 
 
 ## Requirements
 
