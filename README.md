@@ -1,6 +1,6 @@
 # van-cli (TypeScript)
 
-TypeScript CLI wrapper for the NGP VAN API (`https://api.securevan.com/v4`).
+CLI wrapper for the NGP VAN API.
 
 ## Requirements
 
@@ -30,6 +30,64 @@ van people find --firstName Jane --lastName Doe --top 10 --pretty
 van saved-lists list --top 100
 van export-jobs create --savedListId 12345
 ```
+
+## Resource support
+
+This package exposes resources through the TypeScript client (`VanApi`) and also ships a CLI (`van`).
+
+### SDK support (full resource surface)
+
+```ts
+import { VanApi } from 'van-cli';
+
+const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
+```
+
+- `people`: `get`, `find`, `findOrCreate`, `create`, `update`, `getAll`
+- `activistCodes`: `list`, `get`, `getAll`, `apply`, `remove`
+- `surveyQuestions`: `list`, `get`, `getAll`, `recordResponse`
+- `events`: `list`, `get`, `create`, `update`, `delete`, `getSignups`, `getAll`
+- `savedLists`: `list`, `get`, `create`, `update`, `delete`, `getPeople`, `addPerson`, `removePerson`, `getAll`
+- `exportJobs`: `list`, `get`, `create`, `getDownloadUrl`, `getAll`
+- `canvassResponses`: `list`, `get`, `create`, `getByPerson`, `getAll`
+- `contributions`: `list`, `get`, `create`, `update`, `getByPerson`, `getAll`
+- `signups`: `list`, `get`, `create`, `update`, `delete`, `getByEvent`, `getByPerson`, `getAll`
+- `notes`: `list`, `get`, `create`, `update`, `delete`, `getByPerson`, `getAll`
+- `scores`: `list`, `get`, `getAll`, `apply`, `getByPerson`, `update`, `remove`
+- `customFields`: `list`, `get`, `getAll`, `setValue`, `getByPerson`, `updateValue`, `removeValue`
+- `codes`: `list`, `listResultCodes`, `getResultCode`, `listContactTypes`, `getContactType`, `listInputTypes`, `getInputType`, `listSupporterGroups`, `getSupporterGroup`, `getAllResultCodes`, `getAllContactTypes`
+- `targets`: `list`, `get`, `create`, `update`, `delete`, `getPeople`, `addPerson`, `removePerson`, `getAll`
+- `stories`: `list`, `get`, `create`, `update`, `delete`, `getByPerson`, `getAll`
+- `emails`: `list`, `get`, `create`, `update`, `send`, `getStats`, `getRecipients`, `getAll`
+- `bulkImport`: `list`, `listJobs`, `getJob`, `createJob`, `uploadData`, `startJob`, `cancelJob`, `getJobResults`, `getJobErrors`, `getAllJobs`
+- `changedEntityExportJobs`: `list`, `get`, `create`, `getDownloadUrl`, `cancel`, `getStatus`, `getAll`
+- `locations`: `list`, `get`, `find`, `create`, `update`, `getEvents`, `getAll`
+- `contactTypes`: `list`, `get`, `getAll`
+- `eventTypes`: `list`, `get`, `getAll`
+- `supporterGroups`: `list`, `get`, `create`, `update`, `addPerson`, `removePerson`, `getPeople`, `getAll`
+
+### CLI support (current command coverage)
+
+The CLI currently implements a subset of SDK methods:
+
+- `people`: `get`, `find`, `find-or-create`
+- `activist-codes`: `list`
+- `survey-questions`: `list`
+- `events`: `list`
+- `saved-lists`: `list`
+- `export-jobs`: `create`
+- `canvass-responses`: `create`
+- `notes`: `create`
+- `contributions`: `list`, `get`
+- `signups`: `list`, `create`
+- `scores`: `list`, `apply`
+- `custom-fields`: `list`
+- `locations`: `list`, `find`
+- `bulk-import`: `list`
+- `changed-entity-exports`: `list`, `create`
+- `contact-types`: `list`
+- `event-types`: `list`
+- `supporter-groups`: `list`, `create`
 
 ## Robustness features
 
