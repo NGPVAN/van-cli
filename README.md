@@ -15,6 +15,32 @@ export VAN_API_KEY="your-api-key|1"
 export VAN_APP_NAME="your-app-name"
 ```
 
+## Quickstart: Install and Run the CLI
+
+```bash
+# 1) Install dependencies
+npm ci
+
+# 2) Build the TypeScript source
+npm run build
+
+# 3) Expose the `van` command globally from this repo
+npm link
+
+# 4) Set required auth variables in your shell
+export VAN_API_KEY="your-api-key|1"
+export VAN_APP_NAME="your-app-name"
+
+# 5) Confirm the CLI is available
+van --help
+```
+
+If you prefer to skip `npm link`, you can run the CLI directly from the repo:
+
+```bash
+node bin/cli.js --help
+```
+
 ## Scripts
 
 ```bash
