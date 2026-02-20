@@ -15,6 +15,33 @@ if (!process.env.VAN_API_KEY) {
 // Create global client instance
 const client = new VanApiClient();
 
+// Known people expand values for /people endpoints.
+// Source: VAN API validation hint for invalid $expand and docs.ngpvan.com people docs.
+const PEOPLE_KNOWN_EXPANDS = [
+  'contributionHistory',
+  'addresses',
+  'phones',
+  'emails',
+  'codes',
+  'customFields',
+  'externalIds',
+  'preferences',
+  'recordedAddresses',
+  'reportedDemographics',
+  'suppressions',
+  'cases',
+  'customProperties',
+  'districts',
+  'electionRecords',
+  'membershipStatuses',
+  'notes',
+  'organizationRoles',
+  'scores',
+  'disclosureFieldValues',
+  'primaryContact',
+  'pollingLocation'
+];
+
 // Utility function to format and output results
 function outputResult(data, options = {}) {
   if (options.pretty) {
@@ -48,9 +75,27 @@ const peopleCmd = program
   .description('Manage people');
 
 peopleCmd
+  .command('expand-fields')
+  .description('List known $expand fields for people endpoints')
+  .action(() => {
+    outputResult({
+      resource: 'people',
+      knownExpandFields: PEOPLE_KNOWN_EXPANDS,
+      notes: [
+        'Some expansions are endpoint and permission dependent.',
+        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
+      ],
+      sources: [
+        'https://docs.ngpvan.com/reference/peoplevanid-1',
+        'VAN API INVALID_PARAMETER hint for $expand on /people/{vanId}'
+      ]
+    }, program.opts());
+  });
+
+peopleCmd
   .command('get <vanId>')
   .description('Get a person by VAN ID')
-  .option('-e, --expand <fields>', 'Expand related fields (comma-separated)')
+  .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
   .action(async (vanId, options) => {
     try {
       const params = {};
@@ -73,7 +118,7 @@ peopleCmd
   .option('-p, --phone <phone>', 'Phone number')
   .option('--top <count>', 'Number of results (max 50)', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .option('--expand <fields>', 'Expand related fields (comma-separated)')
+  .option('--expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
   .action(async (options) => {
     try {
       const params = {
