@@ -14,7 +14,7 @@ const createChangedEntityExportJobs = require('../../dist/commands/changedEntity
 const createLocations = require('../../dist/commands/locations').default;
 const createSupporterGroups = require('../../dist/commands/supporterGroups').default;
 
-describe('command module smoke tests', () => {
+describe('command module wiring tests', () => {
   let client;
 
   beforeEach(() => {
@@ -29,6 +29,7 @@ describe('command module smoke tests', () => {
 
   it('supports representative method calls across modules', async () => {
     await createPeople(client).find({ firstName: 'Jane' });
+    await createPeople(client).quickSearch({ name: 'Jane Doe' });
     await createPeople(client).findOrCreate({ firstName: 'Jane', lastName: 'Doe' });
     await createEvents(client).list({ top: 10, skip: 0 });
     await createSavedLists(client).addPerson(12, 34);
@@ -47,5 +48,16 @@ describe('command module smoke tests', () => {
 
     expect(client.post).toHaveBeenCalled();
     expect(client.get).toHaveBeenCalled();
+  });
+
+  it('maps people quickSearch params to /people/quickSearch', async () => {
+    await createPeople(client).quickSearch({ name: 'Jane Doe', top: 5, skip: 2, $orderby: 'Name' });
+
+    expect(client.get).toHaveBeenCalledWith('/people/quickSearch', {
+      name: 'Jane Doe',
+      $top: 5,
+      $skip: 2,
+      $orderby: 'Name'
+    });
   });
 });

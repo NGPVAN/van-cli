@@ -1,23 +1,32 @@
 // @ts-nocheck
 
-import { program } from 'commander';
+import { Command, program } from 'commander';
 import chalk from 'chalk';
 import VanApiClient from './client';
 import { version } from '../package.json';
 
+const isCompletionMode = process.argv.includes('completion') || process.argv.includes('__complete');
+
 // Check for required environment variables
-if (!process.env.VAN_API_KEY) {
+if (!process.env.VAN_API_KEY && !isCompletionMode) {
   console.error(chalk.red('Error: VAN_API_KEY environment variable is required'));
   console.error(chalk.yellow('Set it in your shell: export VAN_API_KEY="your-api-key|0"'));
   process.exit(1);
 }
 
 // Create global client instance
-const client = new VanApiClient();
+const client = process.env.VAN_API_KEY ? new VanApiClient() : null;
 
-// Known people expand values for /people endpoints.
+function getClient() {
+  if (!client) {
+    throw new Error('VAN_API_KEY environment variable is required');
+  }
+  return client;
+}
+
+// Known people expand values for /people/{vanId}.
 // Source: VAN API validation hint for invalid $expand and docs.ngpvan.com people docs.
-const PEOPLE_KNOWN_EXPANDS = [
+const PEOPLE_GET_KNOWN_EXPANDS = [
   'contributionHistory',
   'addresses',
   'phones',
@@ -42,6 +51,15 @@ const PEOPLE_KNOWN_EXPANDS = [
   'pollingLocation'
 ];
 
+// Valid $expand values for GET /people search endpoint.
+const PEOPLE_SEARCH_EXPANDS = [
+  'Addresses',
+  'Emails',
+  'Phones',
+  'Districts',
+  'PollingLocation'
+];
+
 // Utility function to format and output results
 function outputResult(data, options = {}) {
   if (options.pretty) {
@@ -62,12 +80,118 @@ function handleError(error) {
   process.exit(1);
 }
 
+function optionTakesValue(option) {
+  return Boolean(option.required || option.optional);
+}
+
+function findSubcommand(command, token) {
+  return command.commands.find(sub => sub.name() === token || sub.aliases().includes(token));
+}
+
+function getCompletionCandidates(command, words) {
+  const tokens = Array.isArray(words) ? words : [];
+  const current = tokens.length > 0 ? tokens[tokens.length - 1] : '';
+  const consumed = tokens.slice(0, -1);
+  let currentCommand = command;
+
+  for (let i = 0; i < consumed.length; i += 1) {
+    const token = consumed[i];
+    if (token.startsWith('-')) {
+      const opt = currentCommand.options.find(option => option.long === token || option.short === token);
+      if (opt && optionTakesValue(opt)) {
+        i += 1;
+      }
+      continue;
+    }
+
+    const sub = findSubcommand(currentCommand, token);
+    if (!sub) {
+      break;
+    }
+    currentCommand = sub;
+  }
+
+  const previous = consumed.length > 0 ? consumed[consumed.length - 1] : '';
+  if (previous.startsWith('-')) {
+    const previousOpt = currentCommand.options.find(option => option.long === previous || option.short === previous);
+    if (previousOpt && optionTakesValue(previousOpt)) {
+      return [];
+    }
+  }
+
+  const subcommands = currentCommand.commands
+    .filter(sub => !sub._hidden)
+    .map(sub => sub.name());
+
+  const options = currentCommand.options.flatMap(option => {
+    const entries = [];
+    if (option.long) entries.push(option.long);
+    if (option.short) entries.push(option.short);
+    return entries;
+  });
+
+  const candidates = current.startsWith('-')
+    ? options
+    : [...subcommands, ...options];
+
+  return candidates
+    .filter(candidate => candidate.startsWith(current))
+    .sort();
+}
+
 // Set up the main program
 program
   .name('van')
   .description('NGP VAN API CLI tool')
   .version(version)
   .option('-p, --pretty', 'Pretty print JSON output');
+
+const internalCompleteCmd = new Command('__complete');
+internalCompleteCmd
+  .argument('[words...]')
+  .action((words = []) => {
+    const suggestions = getCompletionCandidates(program, words);
+    if (suggestions.length > 0) {
+      console.log(suggestions.join('\n'));
+    }
+  });
+program.addCommand(internalCompleteCmd, { hidden: true });
+
+program
+  .command('completion [shell]')
+  .description('Generate shell completion script (bash|zsh)')
+  .action((shell = 'zsh') => {
+    if (shell === 'bash') {
+      console.log(`# bash completion for van
+_van_completion() {
+  local -a words
+  local i
+  for ((i=1; i<=COMP_CWORD; i++)); do
+    words+=("\${COMP_WORDS[i]}")
+  done
+  COMPREPLY=( $(van __complete "\${words[@]}") )
+}
+complete -F _van_completion van`);
+      return;
+    }
+
+    if (shell === 'zsh') {
+      console.log(`#compdef van
+_van_completion() {
+  local -a args completions
+  local i
+  for ((i=2; i<=CURRENT; i++)); do
+    args+=("\${words[i]}")
+  done
+  completions=("\${(@f)$(van __complete "\${args[@]}")}")
+  compadd -a completions
+}
+compdef _van_completion van`);
+      return;
+    }
+
+    throw new Error(`Unsupported shell '${shell}'. Use 'bash' or 'zsh'.`);
+  });
 
 // People commands
 const peopleCmd = program
@@ -80,7 +204,10 @@ peopleCmd
   .action(() => {
     outputResult({
       resource: 'people',
-      knownExpandFields: PEOPLE_KNOWN_EXPANDS,
+      endpointExpandFields: {
+        '/people': PEOPLE_SEARCH_EXPANDS,
+        '/people/{vanId}': PEOPLE_GET_KNOWN_EXPANDS
+      },
       notes: [
         'Some expansions are endpoint and permission dependent.',
         'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
@@ -114,10 +241,20 @@ peopleCmd
   .description('Find people by criteria')
   .option('-f, --firstName <name>', 'First name')
   .option('-l, --lastName <name>', 'Last name')
+  .option('--middleName <name>', 'Middle name')
+  .option('--streetAddress <address>', 'Street address')
+  .option('--city <city>', 'City')
+  .option('--stateOrProvince <state>', 'State/province')
+  .option('--zipOrPostalCode <zip>', 'ZIP/postal code')
+  .option('--phoneNumber <phone>', 'Phone number')
   .option('-e, --email <email>', 'Email address')
-  .option('-p, --phone <phone>', 'Phone number')
+  .option('-p, --phone <phone>', 'Phone number (alias for --phoneNumber)')
+  .option('--commonName <name>', 'Organization common name')
+  .option('--officialName <name>', 'Organization official name')
+  .option('--contactMode <mode>', 'Contact mode: Person or Organization')
   .option('--top <count>', 'Number of results (max 50)', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .option('--orderby <expr>', 'OData $orderby expression (example: Name)')
   .option('--expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
   .action(async (options) => {
     try {
@@ -128,11 +265,47 @@ peopleCmd
       
       if (options.firstName) params.firstName = options.firstName;
       if (options.lastName) params.lastName = options.lastName;
+      if (options.middleName) params.middleName = options.middleName;
+      if (options.streetAddress) params.streetAddress = options.streetAddress;
+      if (options.city) params.city = options.city;
+      if (options.stateOrProvince) params.stateOrProvince = options.stateOrProvince;
+      if (options.zipOrPostalCode) params.zipOrPostalCode = options.zipOrPostalCode;
+      if (options.phoneNumber) params.phoneNumber = options.phoneNumber;
+      if (options.phone) params.phoneNumber = options.phone;
       if (options.email) params.email = options.email;
-      if (options.phone) params.phone = options.phone;
+      if (options.commonName) params.commonName = options.commonName;
+      if (options.officialName) params.officialName = options.officialName;
+      if (options.contactMode) params.contactMode = options.contactMode;
+      if (options.orderby) params.$orderby = options.orderby;
       if (options.expand) params.$expand = options.expand;
       
       const results = await client.get('/people', params);
+      outputResult(results, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+peopleCmd
+  .command('quick-search')
+  .description('Fuzzy search people/orgs by a single name string')
+  .requiredOption('-n, --name <name>', 'Name query (example: John Smith)')
+  .option('--top <count>', 'Number of results (max 50)', val => parseInt(val, 10), 50)
+  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .option('--orderby <expr>', 'OData $orderby expression (example: Name)')
+  .option('--expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
+  .action(async (options) => {
+    try {
+      const params = {
+        name: options.name,
+        $top: options.top,
+        $skip: options.skip
+      };
+
+      if (options.orderby) params.$orderby = options.orderby;
+      if (options.expand) params.$expand = options.expand;
+
+      const results = await client.get('/people/quickSearch', params);
       outputResult(results, program.opts());
     } catch (error) {
       handleError(error);
@@ -723,6 +896,19 @@ supporterGroupsCmd
       
       const group = await client.post('/supporterGroups', data);
       outputResult(group, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// API Key Profiles command
+program
+  .command('api-key-profiles')
+  .description('Get API key profile details for the current API key')
+  .action(async () => {
+    try {
+      const profileDetails = await client.get('/apiKeyProfiles');
+      outputResult(profileDetails, program.opts());
     } catch (error) {
       handleError(error);
     }

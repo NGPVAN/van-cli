@@ -41,6 +41,20 @@ If you prefer to skip `npm link`, you can run the CLI directly from the repo:
 node bin/cli.js --help
 ```
 
+## Shell completion
+
+Enable tab completion by sourcing the generated script:
+
+```bash
+# zsh
+eval "$(van completion zsh)"
+
+# bash
+eval "$(van completion bash)"
+```
+
+To make it persistent, add the command for your shell to `~/.zshrc` or `~/.bashrc`.
+
 ## Scripts
 
 ```bash
@@ -53,6 +67,9 @@ npm run test:coverage
 
 ```bash
 van people find --firstName Jane --lastName Doe --top 10 --pretty
+van people find --city "Falls Church" --stateOrProvince VA --lastName Smith --top 10 --pretty
+van people quick-search --name "John Smith" --top 10 --pretty
+van api-key-profiles --pretty
 van saved-lists list --top 100
 van export-jobs create --savedListId 12345
 ```
@@ -69,7 +86,7 @@ import { VanApi } from 'van-cli';
 const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 ```
 
-- `people`: `get`, `find`, `findOrCreate`, `create`, `update`, `getAll`
+- `people`: `get`, `find`, `quickSearch`, `findOrCreate`, `create`, `update`, `getAll`
 - `activistCodes`: `list`, `get`, `getAll`, `apply`, `remove`
 - `surveyQuestions`: `list`, `get`, `getAll`, `recordResponse`
 - `events`: `list`, `get`, `create`, `update`, `delete`, `getSignups`, `getAll`
@@ -96,7 +113,7 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 
 The CLI currently implements a subset of SDK methods:
 
-- `people`: `get`, `find`, `find-or-create`
+- `people`: `get`, `find`, `quick-search`, `find-or-create`
 - `activist-codes`: `list`
 - `survey-questions`: `list`
 - `events`: `list`
@@ -114,10 +131,12 @@ The CLI currently implements a subset of SDK methods:
 - `contact-types`: `list`
 - `event-types`: `list`
 - `supporter-groups`: `list`, `create`
+- `api-key-profiles`
 
 ## Robustness features
 
 - Retries on transient VAN errors (`429`, `5xx`) with exponential backoff
 - Consistent typed API errors (`VanApiError`)
 - Pagination helpers (`getPaginated`, `getAllPaginated`)
+- Built-in shell completion generator (`van completion zsh|bash`)
 - Jest coverage thresholds enforced in CI (`jest.config.cjs`)

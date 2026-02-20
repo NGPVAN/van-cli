@@ -25,10 +25,19 @@ const create = function(client: VanApiClientLike) {
      * @param {Object} criteria - Search criteria
      * @param {string} criteria.firstName - First name
      * @param {string} criteria.lastName - Last name
+     * @param {string} criteria.middleName - Middle name
+     * @param {string} criteria.streetAddress - Street address
+     * @param {string} criteria.city - City
+     * @param {string} criteria.stateOrProvince - State/province
+     * @param {string} criteria.zipOrPostalCode - ZIP/postal code
+     * @param {string} criteria.phoneNumber - Phone number
      * @param {string} criteria.email - Email address
-     * @param {string} criteria.phone - Phone number
+     * @param {string} criteria.commonName - Organization common name
+     * @param {string} criteria.officialName - Organization official name
+     * @param {string} criteria.contactMode - Person or Organization
      * @param {number} criteria.top - Number of results (max 50)
      * @param {number} criteria.skip - Number of results to skip
+     * @param {string} criteria.$orderby - Sort expression (for example: Name)
      * @param {string} criteria.$expand - Comma-separated fields to expand
      * @returns {Promise<Object>} Search results
      */
@@ -41,11 +50,44 @@ const create = function(client: VanApiClientLike) {
       // Add search criteria
       if (criteria.firstName) params.firstName = criteria.firstName;
       if (criteria.lastName) params.lastName = criteria.lastName;
+      if (criteria.middleName) params.middleName = criteria.middleName;
+      if (criteria.streetAddress) params.streetAddress = criteria.streetAddress;
+      if (criteria.city) params.city = criteria.city;
+      if (criteria.stateOrProvince) params.stateOrProvince = criteria.stateOrProvince;
+      if (criteria.zipOrPostalCode) params.zipOrPostalCode = criteria.zipOrPostalCode;
+      if (criteria.phoneNumber) params.phoneNumber = criteria.phoneNumber;
+      if (criteria.phone) params.phoneNumber = criteria.phone; // Backward-compatible alias
       if (criteria.email) params.email = criteria.email;
-      if (criteria.phone) params.phone = criteria.phone;
+      if (criteria.commonName) params.commonName = criteria.commonName;
+      if (criteria.officialName) params.officialName = criteria.officialName;
+      if (criteria.contactMode) params.contactMode = criteria.contactMode;
+      if (criteria.$orderby) params.$orderby = criteria.$orderby;
       if (criteria.$expand) params.$expand = criteria.$expand;
       
       return client.get('/people', params);
+    },
+
+    /**
+     * Fuzzy name search across people and organizations
+     * @param {Object} criteria - Search criteria
+     * @param {string} criteria.name - Name string to match
+     * @param {number} criteria.top - Number of results (max 50)
+     * @param {number} criteria.skip - Number of results to skip
+     * @param {string} criteria.$orderby - Sort expression (for example: Name)
+     * @param {string} criteria.$expand - Comma-separated fields to expand
+     * @returns {Promise<Object>} Search results
+     */
+    async quickSearch(criteria = {}) {
+      const params = {
+        name: criteria.name,
+        $top: Math.min(criteria.top || 50, 50),
+        $skip: criteria.skip || 0
+      };
+
+      if (criteria.$orderby) params.$orderby = criteria.$orderby;
+      if (criteria.$expand) params.$expand = criteria.$expand;
+
+      return client.get('/people/quickSearch', params);
     },
     
     /**
