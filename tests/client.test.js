@@ -45,6 +45,11 @@ describe('VanApiClient', () => {
 
     await client.getPaginated('/people', { top: 10, skip: 5 });
     expect(mockHttp.get).toHaveBeenCalledWith('/people', { params: { $top: 10, $skip: 5 } });
+
+    mockHttp.get.mockResolvedValueOnce({ data: { items: [{ id: 1 }, { id: 2 }] } })
+      .mockResolvedValueOnce({ data: { items: [] } });
+    const all = await client.getAllPaginated('/people', { top: 2 }, 10);
+    expect(all).toEqual([{ id: 1 }, { id: 2 }]);
   });
 
   it('retries 429s and maps api errors', async () => {
@@ -58,5 +63,20 @@ describe('VanApiClient', () => {
 
     const interceptor = mockHttp.interceptors.response.use.mock.calls[0][1];
     expect(() => interceptor({ response: { status: 403, data: { errors: [{ text: 'Forbidden' }] } } })).toThrow(VanApiError);
+    expect(() => interceptor({ request: {} })).toThrow(/Network error/);
+  });
+
+  it('covers api key mode normalization and non-retry errors', async () => {
+    const modeZero = new VanApiClient({ apiKey: 'abc|0' });
+    expect(modeZero.databaseMode).toBe(0);
+
+    const invalidMode = new VanApiClient({ apiKey: 'abc|9' });
+    expect(invalidMode.databaseMode).toBe(1);
+
+    const noMode = new VanApiClient({ apiKey: 'abc' });
+    expect(noMode.databaseMode).toBe(1);
+
+    mockHttp.get.mockRejectedValueOnce({ response: { status: 400, data: { errors: [{ text: 'Bad request' }] } } });
+    await expect(noMode.get('/people')).rejects.toBeDefined();
   });
 });
