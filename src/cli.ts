@@ -80,6 +80,18 @@ function handleError(error) {
   process.exit(1);
 }
 
+function parseJsonPayload(options) {
+  const raw = options.data || options.json;
+  if (!raw) {
+    throw new Error('JSON payload is required. Pass --data "{...}"');
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Invalid JSON payload: ${error.message}`);
+  }
+}
+
 function optionTakesValue(option) {
   return Boolean(option.required || option.optional);
 }
@@ -231,6 +243,34 @@ peopleCmd
       }
       const person = await client.get(`/people/${vanId}`, params);
       outputResult(person, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+peopleCmd
+  .command('update <vanId>')
+  .description('Update a person by VAN ID')
+  .requiredOption('-d, --data <json>', 'JSON payload for person update')
+  .action(async (vanId, options) => {
+    try {
+      const payload = parseJsonPayload(options);
+      // VAN docs define person updates as POST /people/{vanId}
+      // (GET and DELETE share this path with different methods).
+      const result = await client.post(`/people/${vanId}`, payload);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+peopleCmd
+  .command('delete <vanId>')
+  .description('Delete a person by VAN ID')
+  .action(async (vanId) => {
+    try {
+      const result = await client.delete(`/people/${vanId}`);
+      outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -411,6 +451,32 @@ eventsCmd
     }
   });
 
+eventsCmd
+  .command('update <eventId>')
+  .description('Update an event by ID')
+  .requiredOption('-d, --data <json>', 'JSON payload for event update')
+  .action(async (eventId, options) => {
+    try {
+      const payload = parseJsonPayload(options);
+      const result = await client.put(`/events/${eventId}`, payload);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+eventsCmd
+  .command('delete <eventId>')
+  .description('Delete an event by ID')
+  .action(async (eventId) => {
+    try {
+      const result = await client.delete(`/events/${eventId}`);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
 // Saved Lists commands
 const savedListsCmd = program
   .command('saved-lists')
@@ -429,6 +495,32 @@ savedListsCmd
       };
       const lists = await client.get('/savedLists', params);
       outputResult(lists, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+savedListsCmd
+  .command('update <savedListId>')
+  .description('Update a saved list by ID')
+  .requiredOption('-d, --data <json>', 'JSON payload for saved list update')
+  .action(async (savedListId, options) => {
+    try {
+      const payload = parseJsonPayload(options);
+      const result = await client.put(`/savedLists/${savedListId}`, payload);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+savedListsCmd
+  .command('delete <savedListId>')
+  .description('Delete a saved list by ID')
+  .action(async (savedListId) => {
+    try {
+      const result = await client.delete(`/savedLists/${savedListId}`);
+      outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -508,6 +600,32 @@ notesCmd
       
       const note = await client.post('/notes', data);
       outputResult(note, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+notesCmd
+  .command('update <noteId>')
+  .description('Update a note by ID')
+  .requiredOption('-d, --data <json>', 'JSON payload for note update')
+  .action(async (noteId, options) => {
+    try {
+      const payload = parseJsonPayload(options);
+      const result = await client.put(`/notes/${noteId}`, payload);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+notesCmd
+  .command('delete <noteId>')
+  .description('Delete a note by ID')
+  .action(async (noteId) => {
+    try {
+      const result = await client.delete(`/notes/${noteId}`);
+      outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -604,6 +722,32 @@ signupsCmd
       
       const signup = await client.post('/signups', data);
       outputResult(signup, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+signupsCmd
+  .command('update <signupId>')
+  .description('Update a signup by ID')
+  .requiredOption('-d, --data <json>', 'JSON payload for signup update')
+  .action(async (signupId, options) => {
+    try {
+      const payload = parseJsonPayload(options);
+      const result = await client.put(`/signups/${signupId}`, payload);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+signupsCmd
+  .command('delete <signupId>')
+  .description('Delete a signup by ID')
+  .action(async (signupId) => {
+    try {
+      const result = await client.delete(`/signups/${signupId}`);
+      outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -896,6 +1040,32 @@ supporterGroupsCmd
       
       const group = await client.post('/supporterGroups', data);
       outputResult(group, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+supporterGroupsCmd
+  .command('update <groupId>')
+  .description('Update a supporter group by ID')
+  .requiredOption('-d, --data <json>', 'JSON payload for supporter group update')
+  .action(async (groupId, options) => {
+    try {
+      const payload = parseJsonPayload(options);
+      const result = await client.put(`/supporterGroups/${groupId}`, payload);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+supporterGroupsCmd
+  .command('delete <groupId>')
+  .description('Delete a supporter group by ID')
+  .action(async (groupId) => {
+    try {
+      const result = await client.delete(`/supporterGroups/${groupId}`);
+      outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }

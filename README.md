@@ -113,16 +113,16 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 
 The CLI currently implements a subset of SDK methods:
 
-- `people`: `get`, `find`, `quick-search`, `find-or-create`
+- `people`: `get`, `find`, `quick-search`, `find-or-create`, `update`, `delete`
 - `activist-codes`: `list`
 - `survey-questions`: `list`
-- `events`: `list`
-- `saved-lists`: `list`
+- `events`: `list`, `update`, `delete`
+- `saved-lists`: `list`, `update`, `delete`
 - `export-jobs`: `create`
 - `canvass-responses`: `create`
-- `notes`: `create`
+- `notes`: `create`, `update`, `delete`
 - `contributions`: `list`, `get`
-- `signups`: `list`, `create`
+- `signups`: `list`, `create`, `update`, `delete`
 - `scores`: `list`, `apply`
 - `custom-fields`: `list`
 - `locations`: `list`, `find`
@@ -130,7 +130,7 @@ The CLI currently implements a subset of SDK methods:
 - `changed-entity-exports`: `list`, `create`
 - `contact-types`: `list`
 - `event-types`: `list`
-- `supporter-groups`: `list`, `create`
+- `supporter-groups`: `list`, `create`, `update`, `delete`
 - `api-key-profiles`
 
 ## Robustness features

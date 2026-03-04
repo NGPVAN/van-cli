@@ -127,7 +127,9 @@ const create = function(client: VanApiClientLike) {
      * @returns {Promise<Object>} Updated person object
      */
     async update(vanId, personData) {
-      return client.put(`/people/${vanId}`, personData);
+      // VAN API docs use POST /people/{vanId} for person updates.
+      // PUT is not supported on this endpoint in VAN v4.
+      return client.post(`/people/${vanId}`, personData);
     },
     
     /**
