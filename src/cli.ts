@@ -4,15 +4,38 @@ import { Command, program } from 'commander';
 import chalk from 'chalk';
 import VanApiClient from './client';
 import { version } from '../package.json';
+import { getProfile, checkConfigPermissions } from './config';
 
 const isCompletionMode = process.argv.includes('completion') || process.argv.includes('__complete');
-
-// Check for required environment variables (not needed for schema/completion)
 const isSchemaMode = process.argv.includes('schema');
-if (!process.env.VAN_API_KEY && !isCompletionMode && !isSchemaMode) {
-  console.error(chalk.red('Error: VAN_API_KEY environment variable is required'));
-  console.error(chalk.yellow('Set it in your shell: export VAN_API_KEY="your-api-key|0"'));
-  process.exit(1);
+const isConfigMode = process.argv.includes('config');
+
+// Resolve API key from: --profile flag > VAN_PROFILE env > VAN_API_KEY env > config [default]
+// Deferred until getClient() so --profile flag is available after parsing.
+function resolveProfile(): { apiKey: string; appName?: string } | null {
+  const globalOpts = program.opts();
+  const profileName = globalOpts.profile || process.env.VAN_PROFILE;
+
+  if (profileName) {
+    const profile = getProfile(profileName);
+    if (!profile || !profile.api_key) {
+      console.error(chalk.red(`Error: Profile "${profileName}" not found or has no api_key in config.`));
+      console.error(chalk.yellow('Run "van config list" to see available profiles.'));
+      process.exit(1);
+    }
+    return { apiKey: profile.api_key, appName: profile.app_name };
+  }
+
+  if (process.env.VAN_API_KEY) {
+    return { apiKey: process.env.VAN_API_KEY, appName: process.env.VAN_APP_NAME };
+  }
+
+  const defaultProfile = getProfile('default');
+  if (defaultProfile?.api_key) {
+    return { apiKey: defaultProfile.api_key, appName: defaultProfile.app_name };
+  }
+
+  return null;
 }
 
 // Create global client instance (deferred until after program parses global options)
@@ -21,7 +44,24 @@ let client: VanApiClient | null = null;
 function getClient() {
   if (!client) {
     const globalOpts = program.opts();
-    client = new VanApiClient({ dryRun: globalOpts.dryRun ?? false });
+    const resolved = resolveProfile();
+    if (!resolved) {
+      console.error(chalk.red('Error: No API key found. Provide one via:'));
+      console.error(chalk.yellow('  --profile <name>     Use a named profile from ~/.van/config'));
+      console.error(chalk.yellow('  VAN_PROFILE=<name>   Environment variable for profile'));
+      console.error(chalk.yellow('  VAN_API_KEY=<key>    Environment variable for API key'));
+      console.error(chalk.yellow('  ~/.van/config        [default] section'));
+      process.exit(1);
+    }
+
+    const warning = checkConfigPermissions();
+    if (warning) console.error(chalk.yellow(warning));
+
+    client = new VanApiClient({
+      apiKey: resolved.apiKey,
+      appName: resolved.appName,
+      dryRun: globalOpts.dryRun ?? false,
+    });
   }
   return client;
 }
@@ -261,7 +301,7 @@ function buildSchemaData() {
   const resources: Record<string, Record<string, unknown>> = {};
 
   for (const cmd of program.commands) {
-    if (cmd._hidden || ['completion', 'schema'].includes(cmd.name())) continue;
+    if (cmd._hidden || ['completion', 'schema', 'config'].includes(cmd.name())) continue;
     const resourceName = cmd.name();
     const actions: Record<string, unknown> = {};
 
@@ -302,8 +342,8 @@ function extractCommandSchema(cmd) {
   // Options
   const options = cmd.options.filter(opt => {
     // Skip inherited global options
-    return !['--pretty', '--json', '--dry-run', '--fields', '-V', '--version', '-h', '--help'].includes(opt.long) &&
-           !['--pretty', '--json', '--dry-run', '--fields', '-V', '--version', '-h', '--help'].includes(opt.short);
+    return !['--pretty', '--json', '--dry-run', '--fields', '--profile', '-V', '--version', '-h', '--help'].includes(opt.long) &&
+           !['--pretty', '--json', '--dry-run', '--fields', '--profile', '-V', '--version', '-h', '--help'].includes(opt.short);
   });
   if (options.length > 0) {
     schema.options = options.map(opt => {
@@ -324,12 +364,13 @@ function extractCommandSchema(cmd) {
 
 program
   .name('van')
-  .description('NGP VAN API CLI tool. Supports --json, --dry-run, and --fields for agent-friendly usage.')
+  .description('NGP VAN API CLI tool. Supports --json, --dry-run, --fields, and --profile for agent-friendly usage.')
   .version(version)
   .option('-p, --pretty', 'Pretty-print JSON output')
   .option('--json <payload>', 'Raw JSON object to merge with CLI options (CLI flags take precedence)')
   .option('--dry-run', 'Print the HTTP request that would be made without executing it')
-  .option('--fields <keys>', 'Comma-separated list of fields to include in the output');
+  .option('--fields <keys>', 'Comma-separated list of fields to include in the output')
+  .option('--profile <name>', 'Use a named profile from ~/.van/config (overrides VAN_PROFILE env)');
 
 const internalCompleteCmd = new Command('__complete');
 internalCompleteCmd
@@ -1338,6 +1379,95 @@ program
     } catch (error) {
       handleError(error);
     }
+  });
+
+// --- Config commands ---
+
+import {
+  loadConfig, saveConfig, getConfigPath, listProfiles,
+  addProfile, removeProfile, setDefaultProfile, maskApiKey,
+} from './config';
+
+const configCmd = program
+  .command('config')
+  .description('Manage CLI configuration profiles (~/.van/config)');
+
+configCmd
+  .command('list')
+  .description('List all configured profiles')
+  .action(() => {
+    const profiles = loadConfig();
+    const names = Object.keys(profiles);
+    if (names.length === 0) {
+      console.log(chalk.yellow('No profiles configured. Add one with: van config add <name> --api-key <key>'));
+      return;
+    }
+    for (const name of names) {
+      const p = profiles[name];
+      const key = p.api_key ? maskApiKey(p.api_key) : '(not set)';
+      const app = p.app_name || '(default)';
+      const label = name === 'default' ? chalk.green(`[default]`) : `[profile ${name}]`;
+      console.log(`${label}  api_key = ${key}  app_name = ${app}`);
+    }
+  });
+
+configCmd
+  .command('add <name>')
+  .description('Add or update a profile')
+  .requiredOption('--api-key <key>', 'API key for this profile')
+  .option('--app-name <name>', 'Application name for this profile')
+  .action((name, options) => {
+    addProfile(name, options.apiKey, options.appName);
+    console.log(chalk.green(`Profile "${name}" saved.`));
+  });
+
+configCmd
+  .command('remove <name>')
+  .description('Remove a profile')
+  .action((name) => {
+    if (removeProfile(name)) {
+      console.log(chalk.green(`Profile "${name}" removed.`));
+    } else {
+      console.error(chalk.red(`Profile "${name}" not found.`));
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('set-default <name>')
+  .description('Copy a named profile to [default]')
+  .action((name) => {
+    if (setDefaultProfile(name)) {
+      console.log(chalk.green(`Default profile set to "${name}".`));
+    } else {
+      console.error(chalk.red(`Profile "${name}" not found.`));
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('show <name>')
+  .description('Show profile details (API key masked)')
+  .action((name) => {
+    const profiles = loadConfig();
+    const p = profiles[name];
+    if (!p) {
+      console.error(chalk.red(`Profile "${name}" not found.`));
+      process.exit(1);
+    }
+    const display: Record<string, string> = {};
+    for (const [k, v] of Object.entries(p)) {
+      if (v === undefined) continue;
+      display[k] = k === 'api_key' ? maskApiKey(v) : v;
+    }
+    console.log(JSON.stringify(display, null, 2));
+  });
+
+configCmd
+  .command('path')
+  .description('Print the config file path')
+  .action(() => {
+    console.log(getConfigPath());
   });
 
 // Parse command line arguments
