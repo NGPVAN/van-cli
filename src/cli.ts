@@ -364,7 +364,7 @@ function extractCommandSchema(cmd) {
 
 program
   .name('van')
-  .description('NGP VAN API CLI tool. Supports --json, --dry-run, --fields, and --profile for agent-friendly usage.')
+  .description('NGP VAN API CLI tool.\n\nSupports --json, --dry-run, --fields, and --profile for agent-friendly usage.\n\nAPI docs: https://docs.ngpvan.com (append .md for agent-consumable format, e.g. https://docs.ngpvan.com/reference/people.md)')
   .version(version)
   .option('-p, --pretty', 'Pretty-print JSON output')
   .option('--json <payload>', 'Raw JSON object to merge with CLI options (CLI flags take precedence)')
@@ -1469,6 +1469,107 @@ configCmd
   .action(() => {
     console.log(getConfigPath());
   });
+
+// ── Generic API command ─────────────────────────────────────────────
+const apiCmd = program
+  .command('api')
+  .description('Make raw API requests to any VAN endpoint.\n\nUseful for endpoints not yet wrapped by the CLI.\nAPI reference: https://docs.ngpvan.com (append .md for agent-friendly format)');
+
+apiCmd
+  .command('get <endpoint>')
+  .description('GET any VAN API endpoint (e.g. /people?zipOrPostalCode=22043&$top=10)')
+  .action(async (endpoint) => {
+    try {
+      const { path, params } = parseEndpoint(endpoint);
+      const result = await getClient().get(path, params);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+apiCmd
+  .command('post <endpoint>')
+  .description('POST to any VAN API endpoint')
+  .option('--data <json>', 'Request body as JSON (alias for global --json)')
+  .action(async (endpoint, options) => {
+    try {
+      const globalOpts = program.opts();
+      const body = mergeJsonOption(options, globalOpts);
+      const result = await getClient().post(normalizeEndpoint(endpoint), body);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+apiCmd
+  .command('put <endpoint>')
+  .description('PUT to any VAN API endpoint')
+  .option('--data <json>', 'Request body as JSON (alias for global --json)')
+  .action(async (endpoint, options) => {
+    try {
+      const globalOpts = program.opts();
+      const body = mergeJsonOption(options, globalOpts);
+      const result = await getClient().put(normalizeEndpoint(endpoint), body);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+apiCmd
+  .command('delete <endpoint>')
+  .description('DELETE any VAN API endpoint')
+  .action(async (endpoint) => {
+    try {
+      const result = await getClient().delete(normalizeEndpoint(endpoint));
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+apiCmd
+  .command('docs [topic]')
+  .description('Print API documentation URL (append .md for agent-consumable format)')
+  .action((topic) => {
+    const base = 'https://docs.ngpvan.com/reference';
+    if (topic) {
+      console.log(`${base}/${topic}`);
+      console.log(`${base}/${topic}.md  (agent-friendly)`);
+    } else {
+      console.log(base);
+      console.log(`\nCommon endpoints:`);
+      console.log(`  ${base}/people.md`);
+      console.log(`  ${base}/events.md`);
+      console.log(`  ${base}/activist-codes.md`);
+      console.log(`  ${base}/survey-questions.md`);
+      console.log(`  ${base}/saved-lists.md`);
+      console.log(`  ${base}/contributions.md`);
+      console.log(`  ${base}/canvass-responses.md`);
+    }
+  });
+
+// Helper: parse endpoint into path and query params
+function parseEndpoint(endpoint: string): { path: string; params: Record<string, string> } {
+  const [rawPath, query] = endpoint.split('?');
+  const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+  const params: Record<string, string> = {};
+  if (query) {
+    for (const pair of query.split('&')) {
+      const [key, ...rest] = pair.split('=');
+      if (key) params[key] = rest.join('=') || '';
+    }
+  }
+  return { path, params };
+}
+
+// Helper: normalize endpoint to ensure it starts with /
+function normalizeEndpoint(endpoint: string): string {
+  const [path] = endpoint.split('?');
+  return path.startsWith('/') ? path : `/${path}`;
+}
 
 // Parse command line arguments
 program.parseAsync(process.argv);
