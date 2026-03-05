@@ -7,19 +7,21 @@ import { version } from '../package.json';
 
 const isCompletionMode = process.argv.includes('completion') || process.argv.includes('__complete');
 
-// Check for required environment variables
-if (!process.env.VAN_API_KEY && !isCompletionMode) {
+// Check for required environment variables (not needed for schema/completion)
+const isSchemaMode = process.argv.includes('schema');
+if (!process.env.VAN_API_KEY && !isCompletionMode && !isSchemaMode) {
   console.error(chalk.red('Error: VAN_API_KEY environment variable is required'));
   console.error(chalk.yellow('Set it in your shell: export VAN_API_KEY="your-api-key|0"'));
   process.exit(1);
 }
 
-// Create global client instance
-const client = process.env.VAN_API_KEY ? new VanApiClient() : null;
+// Create global client instance (deferred until after program parses global options)
+let client: VanApiClient | null = null;
 
 function getClient() {
   if (!client) {
-    throw new Error('VAN_API_KEY environment variable is required');
+    const globalOpts = program.opts();
+    client = new VanApiClient({ dryRun: globalOpts.dryRun ?? false });
   }
   return client;
 }
@@ -60,12 +62,42 @@ const PEOPLE_SEARCH_EXPANDS = [
   'PollingLocation'
 ];
 
-// Utility function to format and output results
-function outputResult(data, options = {}) {
+// --- Utility functions ---
+
+function filterFields(data: unknown, fields: string): unknown {
+  const keys = fields.split(',').map(k => k.trim()).filter(Boolean);
+  if (keys.length === 0) return data;
+
+  function pickFields(obj: unknown): unknown {
+    if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(item => pickFields(item));
+    const result: Record<string, unknown> = {};
+    for (const key of keys) {
+      if (key in (obj as Record<string, unknown>)) {
+        result[key] = (obj as Record<string, unknown>)[key];
+      }
+    }
+    return result;
+  }
+
+  // Handle paginated {items:[...], ...} responses
+  if (data && typeof data === 'object' && !Array.isArray(data) && 'items' in (data as Record<string, unknown>)) {
+    const d = data as Record<string, unknown>;
+    return { ...d, items: pickFields(d.items) };
+  }
+
+  return pickFields(data);
+}
+
+function outputResult(data: unknown, options: Record<string, unknown> = {}) {
+  let output = data;
+  if (options.fields) {
+    output = filterFields(output, options.fields as string);
+  }
   if (options.pretty) {
-    console.log(JSON.stringify(data, null, 2));
+    console.log(JSON.stringify(output, null, 2));
   } else {
-    console.log(JSON.stringify(data));
+    console.log(JSON.stringify(output));
   }
 }
 
@@ -80,6 +112,23 @@ function handleError(error) {
   process.exit(1);
 }
 
+function parseGlobalJsonPayload(options) {
+  const raw = options.json;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('--json value must be a JSON object');
+    }
+    return parsed;
+  } catch (error) {
+    console.error(chalk.red(`Invalid JSON in --json flag.`));
+    console.error(chalk.yellow(`Received: ${raw}`));
+    console.error(chalk.yellow(`Tip: Ensure your JSON is properly quoted. Example: --json '{"firstName":"John"}'`));
+    process.exit(1);
+  }
+}
+
 function parseJsonPayload(options) {
   const raw = options.data || options.json;
   if (!raw) {
@@ -90,6 +139,61 @@ function parseJsonPayload(options) {
   } catch (error) {
     throw new Error(`Invalid JSON payload: ${error.message}`);
   }
+}
+
+function mergeJsonOption(cliOptions: Record<string, unknown>, globalOpts: Record<string, unknown>): Record<string, unknown> {
+  if (!globalOpts.json) return cliOptions;
+  const jsonData = parseGlobalJsonPayload(globalOpts);
+  // CLI flags take precedence over JSON keys
+  const merged = { ...jsonData };
+  for (const [key, value] of Object.entries(cliOptions)) {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+function validatePositiveInt(value: string, label: string): number {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num <= 0) {
+    console.error(chalk.red(`Error: ${label} must be a positive integer, got: "${value}"`));
+    process.exit(1);
+  }
+  return num;
+}
+
+// Levenshtein distance for fuzzy matching
+function levenshtein(a: string, b: string): number {
+  const la = a.length;
+  const lb = b.length;
+  const dp: number[][] = Array.from({ length: la + 1 }, () => Array(lb + 1).fill(0));
+  for (let i = 0; i <= la; i++) dp[i][0] = i;
+  for (let j = 0; j <= lb; j++) dp[0][j] = j;
+  for (let i = 1; i <= la; i++) {
+    for (let j = 1; j <= lb; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return dp[la][lb];
+}
+
+function suggestClosest(input: string, candidates: string[], maxDistance = 3): string | null {
+  let best: string | null = null;
+  let bestDist = maxDistance + 1;
+  const lower = input.toLowerCase();
+  for (const c of candidates) {
+    const dist = levenshtein(lower, c.toLowerCase());
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = c;
+    }
+  }
+  return best;
 }
 
 function optionTakesValue(option) {
@@ -151,12 +255,81 @@ function getCompletionCandidates(command, words) {
     .sort();
 }
 
-// Set up the main program
+// --- Schema introspection ---
+
+function buildSchemaData() {
+  const resources: Record<string, Record<string, unknown>> = {};
+
+  for (const cmd of program.commands) {
+    if (cmd._hidden || ['completion', 'schema'].includes(cmd.name())) continue;
+    const resourceName = cmd.name();
+    const actions: Record<string, unknown> = {};
+
+    // If the command has subcommands, introspect each
+    if (cmd.commands && cmd.commands.length > 0) {
+      for (const sub of cmd.commands) {
+        if (sub._hidden) continue;
+        actions[sub.name()] = extractCommandSchema(sub);
+      }
+    } else {
+      // Top-level command with no subcommands (e.g. api-key-profiles)
+      actions['default'] = extractCommandSchema(cmd);
+    }
+
+    resources[resourceName] = {
+      description: cmd.description(),
+      actions
+    };
+  }
+  return resources;
+}
+
+function extractCommandSchema(cmd) {
+  const schema: Record<string, unknown> = {
+    description: cmd.description(),
+  };
+
+  // Arguments
+  const args = cmd._args || cmd.registeredArguments || [];
+  if (args.length > 0) {
+    schema.arguments = args.map(arg => ({
+      name: arg.name(),
+      required: arg.required,
+      description: arg.description || undefined,
+    }));
+  }
+
+  // Options
+  const options = cmd.options.filter(opt => {
+    // Skip inherited global options
+    return !['--pretty', '--json', '--dry-run', '--fields', '-V', '--version', '-h', '--help'].includes(opt.long) &&
+           !['--pretty', '--json', '--dry-run', '--fields', '-V', '--version', '-h', '--help'].includes(opt.short);
+  });
+  if (options.length > 0) {
+    schema.options = options.map(opt => {
+      const o: Record<string, unknown> = {
+        flags: opt.flags,
+        description: opt.description,
+        required: opt.mandatory || false,
+      };
+      if (opt.defaultValue !== undefined) o.default = opt.defaultValue;
+      return o;
+    });
+  }
+
+  return schema;
+}
+
+// --- Set up the main program ---
+
 program
   .name('van')
-  .description('NGP VAN API CLI tool')
+  .description('NGP VAN API CLI tool. Supports --json, --dry-run, and --fields for agent-friendly usage.')
   .version(version)
-  .option('-p, --pretty', 'Pretty print JSON output');
+  .option('-p, --pretty', 'Pretty-print JSON output')
+  .option('--json <payload>', 'Raw JSON object to merge with CLI options (CLI flags take precedence)')
+  .option('--dry-run', 'Print the HTTP request that would be made without executing it')
+  .option('--fields <keys>', 'Comma-separated list of fields to include in the output');
 
 const internalCompleteCmd = new Command('__complete');
 internalCompleteCmd
@@ -205,7 +378,52 @@ compdef _van_completion van`);
     throw new Error(`Unsupported shell '${shell}'. Use 'bash' or 'zsh'.`);
   });
 
-// People commands
+// --- Schema command ---
+
+const schemaCmd = program
+  .command('schema [path]')
+  .description('Introspect CLI commands and their parameters. Usage: van schema, van schema <resource>, van schema <resource>.<action>')
+  .action((path) => {
+    const data = buildSchemaData();
+    const allResources = Object.keys(data);
+
+    if (!path) {
+      outputResult(data, program.opts());
+      return;
+    }
+
+    const parts = path.split('.');
+    const resourceKey = parts[0];
+    const actionKey = parts[1];
+
+    if (!data[resourceKey]) {
+      let msg = `Unknown resource: "${resourceKey}".`;
+      const suggestion = suggestClosest(resourceKey, allResources);
+      if (suggestion) msg += ` Did you mean "${suggestion}"?`;
+      console.error(chalk.red(msg));
+      process.exit(1);
+    }
+
+    if (!actionKey) {
+      outputResult(data[resourceKey], program.opts());
+      return;
+    }
+
+    const actions = data[resourceKey].actions as Record<string, unknown>;
+    const allActions = Object.keys(actions);
+    if (!actions[actionKey]) {
+      let msg = `Unknown action: "${actionKey}" for resource "${resourceKey}".`;
+      const suggestion = suggestClosest(actionKey, allActions);
+      if (suggestion) msg += ` Did you mean "${suggestion}"?`;
+      console.error(chalk.red(msg));
+      process.exit(1);
+    }
+
+    outputResult(actions[actionKey], program.opts());
+  });
+
+// --- People commands ---
+
 const peopleCmd = program
   .command('people')
   .description('Manage people');
@@ -237,11 +455,12 @@ peopleCmd
   .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
   .action(async (vanId, options) => {
     try {
+      validatePositiveInt(vanId, 'vanId');
       const params = {};
       if (options.expand) {
         params.$expand = options.expand;
       }
-      const person = await client.get(`/people/${vanId}`, params);
+      const person = await getClient().get(`/people/${vanId}`, params);
       outputResult(person, program.opts());
     } catch (error) {
       handleError(error);
@@ -254,11 +473,12 @@ peopleCmd
   .requiredOption('-d, --data <json>', 'JSON payload for person update')
   .action(async (vanId, options) => {
     try {
+      validatePositiveInt(vanId, 'vanId');
       const payload = parseJsonPayload(options);
-      // VAN docs define person updates as POST /people/{vanId}
-      // (GET and DELETE share this path with different methods).
-      const result = await client.post(`/people/${vanId}`, payload);
-      outputResult(result, program.opts());
+      const globalOpts = program.opts();
+      const merged = globalOpts.json ? { ...parseGlobalJsonPayload(globalOpts), ...payload } : payload;
+      const result = await getClient().post(`/people/${vanId}`, merged);
+      outputResult(result, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -269,7 +489,8 @@ peopleCmd
   .description('Delete a person by VAN ID')
   .action(async (vanId) => {
     try {
-      const result = await client.delete(`/people/${vanId}`);
+      validatePositiveInt(vanId, 'vanId');
+      const result = await getClient().delete(`/people/${vanId}`);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -289,6 +510,9 @@ peopleCmd
   .option('--phoneNumber <phone>', 'Phone number')
   .option('-e, --email <email>', 'Email address')
   .option('-p, --phone <phone>', 'Phone number (alias for --phoneNumber)')
+  .option('--dateOfBirth <date>', 'Date of birth (YYYY-MM-DD)')
+  .option('--employer <employer>', 'Employer name')
+  .option('--occupation <occupation>', 'Occupation')
   .option('--commonName <name>', 'Organization common name')
   .option('--officialName <name>', 'Organization official name')
   .option('--contactMode <mode>', 'Contact mode: Person or Organization')
@@ -298,29 +522,35 @@ peopleCmd
   .option('--expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+
       const params = {
-        $top: options.top,
-        $skip: options.skip
+        $top: merged.top,
+        $skip: merged.skip
       };
-      
-      if (options.firstName) params.firstName = options.firstName;
-      if (options.lastName) params.lastName = options.lastName;
-      if (options.middleName) params.middleName = options.middleName;
-      if (options.streetAddress) params.streetAddress = options.streetAddress;
-      if (options.city) params.city = options.city;
-      if (options.stateOrProvince) params.stateOrProvince = options.stateOrProvince;
-      if (options.zipOrPostalCode) params.zipOrPostalCode = options.zipOrPostalCode;
-      if (options.phoneNumber) params.phoneNumber = options.phoneNumber;
-      if (options.phone) params.phoneNumber = options.phone;
-      if (options.email) params.email = options.email;
-      if (options.commonName) params.commonName = options.commonName;
-      if (options.officialName) params.officialName = options.officialName;
-      if (options.contactMode) params.contactMode = options.contactMode;
-      if (options.orderby) params.$orderby = options.orderby;
-      if (options.expand) params.$expand = options.expand;
-      
-      const results = await client.get('/people', params);
-      outputResult(results, program.opts());
+
+      if (merged.firstName) params.firstName = merged.firstName;
+      if (merged.lastName) params.lastName = merged.lastName;
+      if (merged.middleName) params.middleName = merged.middleName;
+      if (merged.streetAddress) params.streetAddress = merged.streetAddress;
+      if (merged.city) params.city = merged.city;
+      if (merged.stateOrProvince) params.stateOrProvince = merged.stateOrProvince;
+      if (merged.zipOrPostalCode) params.zipOrPostalCode = merged.zipOrPostalCode;
+      if (merged.phoneNumber) params.phoneNumber = merged.phoneNumber;
+      if (merged.phone) params.phoneNumber = merged.phone;
+      if (merged.email) params.email = merged.email;
+      if (merged.dateOfBirth) params.dateOfBirth = merged.dateOfBirth;
+      if (merged.employer) params.employer = merged.employer;
+      if (merged.occupation) params.occupation = merged.occupation;
+      if (merged.commonName) params.commonName = merged.commonName;
+      if (merged.officialName) params.officialName = merged.officialName;
+      if (merged.contactMode) params.contactMode = merged.contactMode;
+      if (merged.orderby) params.$orderby = merged.orderby;
+      if (merged.expand) params.$expand = merged.expand;
+
+      const results = await getClient().get('/people', params);
+      outputResult(results, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -345,7 +575,7 @@ peopleCmd
       if (options.orderby) params.$orderby = options.orderby;
       if (options.expand) params.$expand = options.expand;
 
-      const results = await client.get('/people/quickSearch', params);
+      const results = await getClient().get('/people/quickSearch', params);
       outputResult(results, program.opts());
     } catch (error) {
       handleError(error);
@@ -361,16 +591,19 @@ peopleCmd
   .option('-p, --phone <phone>', 'Phone number')
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+
       const data = {
-        firstName: options.firstName,
-        lastName: options.lastName
+        firstName: merged.firstName,
+        lastName: merged.lastName
       };
-      
-      if (options.email) data.email = options.email;
-      if (options.phone) data.phone = options.phone;
-      
-      const result = await client.post('/people/findOrCreate', data);
-      outputResult(result, program.opts());
+
+      if (merged.email) data.email = merged.email;
+      if (merged.phone) data.phone = merged.phone;
+
+      const result = await getClient().post('/people/findOrCreate', data);
+      outputResult(result, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -392,7 +625,7 @@ activistCodesCmd
         $top: options.top,
         $skip: options.skip
       };
-      const codes = await client.get('/activistCodes', params);
+      const codes = await getClient().get('/activistCodes', params);
       outputResult(codes, program.opts());
     } catch (error) {
       handleError(error);
@@ -415,7 +648,7 @@ surveyQuestionsCmd
         $top: options.top,
         $skip: options.skip
       };
-      const questions = await client.get('/surveyQuestions', params);
+      const questions = await getClient().get('/surveyQuestions', params);
       outputResult(questions, program.opts());
     } catch (error) {
       handleError(error);
@@ -440,11 +673,11 @@ eventsCmd
         $top: options.top,
         $skip: options.skip
       };
-      
+
       if (options.startDate) params.startDate = options.startDate;
       if (options.endDate) params.endDate = options.endDate;
-      
-      const events = await client.get('/events', params);
+
+      const events = await getClient().get('/events', params);
       outputResult(events, program.opts());
     } catch (error) {
       handleError(error);
@@ -457,8 +690,9 @@ eventsCmd
   .requiredOption('-d, --data <json>', 'JSON payload for event update')
   .action(async (eventId, options) => {
     try {
+      validatePositiveInt(eventId, 'eventId');
       const payload = parseJsonPayload(options);
-      const result = await client.put(`/events/${eventId}`, payload);
+      const result = await getClient().put(`/events/${eventId}`, payload);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -470,7 +704,8 @@ eventsCmd
   .description('Delete an event by ID')
   .action(async (eventId) => {
     try {
-      const result = await client.delete(`/events/${eventId}`);
+      validatePositiveInt(eventId, 'eventId');
+      const result = await getClient().delete(`/events/${eventId}`);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -493,7 +728,7 @@ savedListsCmd
         $top: Math.min(options.top, 100), // VAN limits saved lists to 100
         $skip: options.skip
       };
-      const lists = await client.get('/savedLists', params);
+      const lists = await getClient().get('/savedLists', params);
       outputResult(lists, program.opts());
     } catch (error) {
       handleError(error);
@@ -506,8 +741,9 @@ savedListsCmd
   .requiredOption('-d, --data <json>', 'JSON payload for saved list update')
   .action(async (savedListId, options) => {
     try {
+      validatePositiveInt(savedListId, 'savedListId');
       const payload = parseJsonPayload(options);
-      const result = await client.put(`/savedLists/${savedListId}`, payload);
+      const result = await getClient().put(`/savedLists/${savedListId}`, payload);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -519,7 +755,8 @@ savedListsCmd
   .description('Delete a saved list by ID')
   .action(async (savedListId) => {
     try {
-      const result = await client.delete(`/savedLists/${savedListId}`);
+      validatePositiveInt(savedListId, 'savedListId');
+      const result = await getClient().delete(`/savedLists/${savedListId}`);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -538,14 +775,16 @@ exportJobsCmd
   .option('-w, --webhookUrl <url>', 'Webhook URL for completion notification')
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
       const data = {
-        savedListId: options.savedListId
+        savedListId: merged.savedListId
       };
-      
-      if (options.webhookUrl) data.webhookUrl = options.webhookUrl;
-      
-      const job = await client.post('/exportJobs', data);
-      outputResult(job, program.opts());
+
+      if (merged.webhookUrl) data.webhookUrl = merged.webhookUrl;
+
+      const job = await getClient().post('/exportJobs', data);
+      outputResult(job, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -564,15 +803,17 @@ canvassResponsesCmd
   .option('-c, --canvassContext <context>', 'Canvass context')
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
       const data = {
-        vanId: options.vanId,
-        resultCodeId: options.resultCodeId
+        vanId: merged.vanId,
+        resultCodeId: merged.resultCodeId
       };
-      
-      if (options.canvassContext) data.canvassContext = options.canvassContext;
-      
-      const response = await client.post('/canvassResponses', data);
-      outputResult(response, program.opts());
+
+      if (merged.canvassContext) data.canvassContext = merged.canvassContext;
+
+      const response = await getClient().post('/canvassResponses', data);
+      outputResult(response, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -591,15 +832,17 @@ notesCmd
   .option('-c, --category <category>', 'Note category')
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
       const data = {
-        vanId: options.vanId,
-        text: options.text
+        vanId: merged.vanId,
+        text: merged.text
       };
-      
-      if (options.category) data.category = options.category;
-      
-      const note = await client.post('/notes', data);
-      outputResult(note, program.opts());
+
+      if (merged.category) data.category = merged.category;
+
+      const note = await getClient().post('/notes', data);
+      outputResult(note, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -611,8 +854,9 @@ notesCmd
   .requiredOption('-d, --data <json>', 'JSON payload for note update')
   .action(async (noteId, options) => {
     try {
+      validatePositiveInt(noteId, 'noteId');
       const payload = parseJsonPayload(options);
-      const result = await client.put(`/notes/${noteId}`, payload);
+      const result = await getClient().put(`/notes/${noteId}`, payload);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -624,7 +868,8 @@ notesCmd
   .description('Delete a note by ID')
   .action(async (noteId) => {
     try {
-      const result = await client.delete(`/notes/${noteId}`);
+      validatePositiveInt(noteId, 'noteId');
+      const result = await getClient().delete(`/notes/${noteId}`);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -650,12 +895,12 @@ contributionsCmd
         $top: options.top,
         $skip: options.skip
       };
-      
+
       if (options.startDate) params.startDate = options.startDate;
       if (options.endDate) params.endDate = options.endDate;
       if (options.vanId) params.vanId = options.vanId;
-      
-      const contributions = await client.get('/contributions', params);
+
+      const contributions = await getClient().get('/contributions', params);
       outputResult(contributions, program.opts());
     } catch (error) {
       handleError(error);
@@ -667,7 +912,8 @@ contributionsCmd
   .description('Get a contribution by ID')
   .action(async (contributionId, options) => {
     try {
-      const contribution = await client.get(`/contributions/${contributionId}`);
+      validatePositiveInt(contributionId, 'contributionId');
+      const contribution = await getClient().get(`/contributions/${contributionId}`);
       outputResult(contribution, program.opts());
     } catch (error) {
       handleError(error);
@@ -692,11 +938,11 @@ signupsCmd
         $top: options.top,
         $skip: options.skip
       };
-      
+
       if (options.eventId) params.eventId = options.eventId;
       if (options.vanId) params.vanId = options.vanId;
-      
-      const signups = await client.get('/signups', params);
+
+      const signups = await getClient().get('/signups', params);
       outputResult(signups, program.opts());
     } catch (error) {
       handleError(error);
@@ -712,16 +958,18 @@ signupsCmd
   .option('-s, --status <status>', 'Signup status')
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
       const data = {
-        eventId: options.eventId,
-        vanId: options.vanId
+        eventId: merged.eventId,
+        vanId: merged.vanId
       };
-      
-      if (options.role) data.role = options.role;
-      if (options.status) data.status = options.status;
-      
-      const signup = await client.post('/signups', data);
-      outputResult(signup, program.opts());
+
+      if (merged.role) data.role = merged.role;
+      if (merged.status) data.status = merged.status;
+
+      const signup = await getClient().post('/signups', data);
+      outputResult(signup, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -733,8 +981,9 @@ signupsCmd
   .requiredOption('-d, --data <json>', 'JSON payload for signup update')
   .action(async (signupId, options) => {
     try {
+      validatePositiveInt(signupId, 'signupId');
       const payload = parseJsonPayload(options);
-      const result = await client.put(`/signups/${signupId}`, payload);
+      const result = await getClient().put(`/signups/${signupId}`, payload);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -746,7 +995,8 @@ signupsCmd
   .description('Delete a signup by ID')
   .action(async (signupId) => {
     try {
-      const result = await client.delete(`/signups/${signupId}`);
+      validatePositiveInt(signupId, 'signupId');
+      const result = await getClient().delete(`/signups/${signupId}`);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -769,7 +1019,7 @@ scoresCmd
         $top: options.top,
         $skip: options.skip
       };
-      const scores = await client.get('/scores', params);
+      const scores = await getClient().get('/scores', params);
       outputResult(scores, program.opts());
     } catch (error) {
       handleError(error);
@@ -788,8 +1038,8 @@ scoresCmd
         scoreId: options.scoreId,
         value: options.value
       };
-      
-      const result = await client.post(`/people/${options.vanId}/scores`, data);
+
+      const result = await getClient().post(`/people/${options.vanId}/scores`, data);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -813,10 +1063,10 @@ customFieldsCmd
         $top: options.top,
         $skip: options.skip
       };
-      
+
       if (options.fieldType) params.fieldType = options.fieldType;
-      
-      const fields = await client.get('/customFields', params);
+
+      const fields = await getClient().get('/customFields', params);
       outputResult(fields, program.opts());
     } catch (error) {
       handleError(error);
@@ -841,11 +1091,11 @@ locationsCmd
         $top: options.top,
         $skip: options.skip
       };
-      
+
       if (options.locationType) params.locationType = options.locationType;
       if (options.state) params.state = options.state;
-      
-      const locations = await client.get('/locations', params);
+
+      const locations = await getClient().get('/locations', params);
       outputResult(locations, program.opts());
     } catch (error) {
       handleError(error);
@@ -867,13 +1117,13 @@ locationsCmd
         $top: options.top,
         $skip: options.skip
       };
-      
+
       if (options.name) params.name = options.name;
       if (options.city) params.city = options.city;
       if (options.state) params.state = options.state;
       if (options.zip) params.zip = options.zip;
-      
-      const results = await client.get('/locations/find', params);
+
+      const results = await getClient().get('/locations/find', params);
       outputResult(results, program.opts());
     } catch (error) {
       handleError(error);
@@ -897,10 +1147,10 @@ bulkImportCmd
         $top: options.top,
         $skip: options.skip
       };
-      
+
       if (options.status) params.status = options.status;
-      
-      const jobs = await client.get('/bulkImportJobs', params);
+
+      const jobs = await getClient().get('/bulkImportJobs', params);
       outputResult(jobs, program.opts());
     } catch (error) {
       handleError(error);
@@ -924,10 +1174,10 @@ changedEntityExportCmd
         $top: options.top,
         $skip: options.skip
       };
-      
+
       if (options.status) params.status = options.status;
-      
-      const jobs = await client.get('/changedEntityExportJobs', params);
+
+      const jobs = await getClient().get('/changedEntityExportJobs', params);
       outputResult(jobs, program.opts());
     } catch (error) {
       handleError(error);
@@ -942,15 +1192,17 @@ changedEntityExportCmd
   .option('-w, --webhookUrl <url>', 'Webhook URL for completion notification')
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
       const data = {
-        dateChangedFrom: options.dateChangedFrom
+        dateChangedFrom: merged.dateChangedFrom
       };
-      
-      if (options.dateChangedTo) data.dateChangedTo = options.dateChangedTo;
-      if (options.webhookUrl) data.webhookUrl = options.webhookUrl;
-      
-      const job = await client.post('/changedEntityExportJobs', data);
-      outputResult(job, program.opts());
+
+      if (merged.dateChangedTo) data.dateChangedTo = merged.dateChangedTo;
+      if (merged.webhookUrl) data.webhookUrl = merged.webhookUrl;
+
+      const job = await getClient().post('/changedEntityExportJobs', data);
+      outputResult(job, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -972,7 +1224,7 @@ contactTypesCmd
         $top: options.top,
         $skip: options.skip
       };
-      const types = await client.get('/contactTypes', params);
+      const types = await getClient().get('/contactTypes', params);
       outputResult(types, program.opts());
     } catch (error) {
       handleError(error);
@@ -995,7 +1247,7 @@ eventTypesCmd
         $top: options.top,
         $skip: options.skip
       };
-      const types = await client.get('/eventTypes', params);
+      const types = await getClient().get('/eventTypes', params);
       outputResult(types, program.opts());
     } catch (error) {
       handleError(error);
@@ -1018,7 +1270,7 @@ supporterGroupsCmd
         $top: options.top,
         $skip: options.skip
       };
-      const groups = await client.get('/supporterGroups', params);
+      const groups = await getClient().get('/supporterGroups', params);
       outputResult(groups, program.opts());
     } catch (error) {
       handleError(error);
@@ -1032,14 +1284,16 @@ supporterGroupsCmd
   .option('-d, --description <desc>', 'Group description')
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
       const data = {
-        name: options.name
+        name: merged.name
       };
-      
-      if (options.description) data.description = options.description;
-      
-      const group = await client.post('/supporterGroups', data);
-      outputResult(group, program.opts());
+
+      if (merged.description) data.description = merged.description;
+
+      const group = await getClient().post('/supporterGroups', data);
+      outputResult(group, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -1051,8 +1305,9 @@ supporterGroupsCmd
   .requiredOption('-d, --data <json>', 'JSON payload for supporter group update')
   .action(async (groupId, options) => {
     try {
+      validatePositiveInt(groupId, 'groupId');
       const payload = parseJsonPayload(options);
-      const result = await client.put(`/supporterGroups/${groupId}`, payload);
+      const result = await getClient().put(`/supporterGroups/${groupId}`, payload);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -1064,7 +1319,8 @@ supporterGroupsCmd
   .description('Delete a supporter group by ID')
   .action(async (groupId) => {
     try {
-      const result = await client.delete(`/supporterGroups/${groupId}`);
+      validatePositiveInt(groupId, 'groupId');
+      const result = await getClient().delete(`/supporterGroups/${groupId}`);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -1077,7 +1333,7 @@ program
   .description('Get API key profile details for the current API key')
   .action(async () => {
     try {
-      const profileDetails = await client.get('/apiKeyProfiles');
+      const profileDetails = await getClient().get('/apiKeyProfiles');
       outputResult(profileDetails, program.opts());
     } catch (error) {
       handleError(error);

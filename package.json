@@ -5,7 +5,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "van": "./bin/cli.js"
+    "van": "./bin/cli.js",
+    "van-cli": "./bin/cli.js",
+    "ea": "./bin/cli.js"
   },
   "files": [
     "bin",

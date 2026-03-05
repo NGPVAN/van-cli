@@ -12,6 +12,7 @@ export interface VanApiClientOptions {
   timeoutMs?: number;
   maxRetries?: number;
   retryBaseDelayMs?: number;
+  dryRun?: boolean;
 }
 
 export interface VanApiClientLike {
