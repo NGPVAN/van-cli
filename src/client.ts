@@ -53,6 +53,7 @@ export class VanApiClient implements VanApiClientLike {
   timeoutMs: number;
   maxRetries: number;
   retryBaseDelayMs: number;
+  dryRun: boolean;
   http: AxiosInstance;
 
   constructor(options: VanApiClientOptions | string = {}, appName?: string) {
@@ -66,6 +67,7 @@ export class VanApiClient implements VanApiClientLike {
     this.timeoutMs = normalizedOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = normalizedOptions.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryBaseDelayMs = normalizedOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    this.dryRun = normalizedOptions.dryRun ?? false;
 
     if (!this.apiKey) {
       throw new Error('VAN_API_KEY environment variable or apiKey option is required');
@@ -126,19 +128,31 @@ export class VanApiClient implements VanApiClientLike {
     }
   }
 
+  private dryRunResult(method: string, endpoint: string, params?: VanParams, body?: VanPayload): unknown {
+    const url = `${this.baseURL}${endpoint}`;
+    const result: Record<string, unknown> = { method, url };
+    if (params && Object.keys(params).length > 0) result.params = params;
+    if (body && Object.keys(body).length > 0) result.body = body;
+    return result;
+  }
+
   async get(endpoint: string, params: VanParams = {}): Promise<unknown> {
+    if (this.dryRun) return this.dryRunResult('GET', endpoint, params);
     return this.withRetry(() => this.http.get(endpoint, { params }));
   }
 
   async post(endpoint: string, data: VanPayload = {}): Promise<unknown> {
+    if (this.dryRun) return this.dryRunResult('POST', endpoint, undefined, data);
     return this.withRetry(() => this.http.post(endpoint, data));
   }
 
   async put(endpoint: string, data: VanPayload = {}): Promise<unknown> {
+    if (this.dryRun) return this.dryRunResult('PUT', endpoint, undefined, data);
     return this.withRetry(() => this.http.put(endpoint, data));
   }
 
   async delete(endpoint: string): Promise<unknown> {
+    if (this.dryRun) return this.dryRunResult('DELETE', endpoint);
     return this.withRetry(() => this.http.delete(endpoint));
   }
 

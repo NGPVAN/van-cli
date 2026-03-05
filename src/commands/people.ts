@@ -35,6 +35,9 @@ const create = function(client: VanApiClientLike) {
      * @param {string} criteria.commonName - Organization common name
      * @param {string} criteria.officialName - Organization official name
      * @param {string} criteria.contactMode - Person or Organization
+     * @param {string} criteria.dateOfBirth - Date of birth (YYYY-MM-DD)
+     * @param {string} criteria.employer - Employer name
+     * @param {string} criteria.occupation - Occupation
      * @param {number} criteria.top - Number of results (max 50)
      * @param {number} criteria.skip - Number of results to skip
      * @param {string} criteria.$orderby - Sort expression (for example: Name)
@@ -46,7 +49,7 @@ const create = function(client: VanApiClientLike) {
         $top: Math.min(criteria.top || 50, 50), // VAN limits people search to 50
         $skip: criteria.skip || 0
       };
-      
+
       // Add search criteria
       if (criteria.firstName) params.firstName = criteria.firstName;
       if (criteria.lastName) params.lastName = criteria.lastName;
@@ -58,12 +61,15 @@ const create = function(client: VanApiClientLike) {
       if (criteria.phoneNumber) params.phoneNumber = criteria.phoneNumber;
       if (criteria.phone) params.phoneNumber = criteria.phone; // Backward-compatible alias
       if (criteria.email) params.email = criteria.email;
+      if (criteria.dateOfBirth) params.dateOfBirth = criteria.dateOfBirth;
+      if (criteria.employer) params.employer = criteria.employer;
+      if (criteria.occupation) params.occupation = criteria.occupation;
       if (criteria.commonName) params.commonName = criteria.commonName;
       if (criteria.officialName) params.officialName = criteria.officialName;
       if (criteria.contactMode) params.contactMode = criteria.contactMode;
       if (criteria.$orderby) params.$orderby = criteria.$orderby;
       if (criteria.$expand) params.$expand = criteria.$expand;
-      
+
       return client.get('/people', params);
     },
 
