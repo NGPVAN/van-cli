@@ -1143,34 +1143,6 @@ locationsCmd
     }
   });
 
-locationsCmd
-  .command('find')
-  .description('Find locations by criteria')
-  .option('-n, --name <name>', 'Location name')
-  .option('-c, --city <city>', 'City name')
-  .option('-s, --state <state>', 'State')
-  .option('-z, --zip <zip>', 'ZIP code')
-  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
-  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .action(async (options) => {
-    try {
-      const params = {
-        $top: options.top,
-        $skip: options.skip
-      };
-
-      if (options.name) params.name = options.name;
-      if (options.city) params.city = options.city;
-      if (options.state) params.state = options.state;
-      if (options.zip) params.zip = options.zip;
-
-      const results = await getClient().get('/locations/find', params);
-      outputResult(results, program.opts());
-    } catch (error) {
-      handleError(error);
-    }
-  });
-
 // Bulk Import commands
 const bulkImportCmd = program
   .command('bulk-import')

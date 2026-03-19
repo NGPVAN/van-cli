@@ -217,7 +217,6 @@ describe('command modules broad coverage', () => {
     const locations = createLocations(client);
     await locations.list({ top: 10, skip: 1, locationType: 'Office', state: 'VA' });
     await locations.get(12);
-    await locations.find({ name: 'HQ', city: 'Falls Church', state: 'VA', zip: '22043', top: 10, skip: 1 });
     await locations.create({ name: 'HQ', city: 'Falls Church' });
     await locations.update(12, { name: 'HQ 2' });
     await locations.getEvents(12, { top: 5, skip: 1 });

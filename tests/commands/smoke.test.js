@@ -43,7 +43,7 @@ describe('command module wiring tests', () => {
     await createEmails(client).create({ name: 'Email 1', subject: 'Hello', body: '<p>Hi</p>' });
     await createBulkImport(client).createJob({ name: 'Import 1', importType: 'People', mappings: { firstName: 'First Name' } });
     await createChangedEntityExportJobs(client).create({ dateChangedFrom: '2026-01-01' });
-    await createLocations(client).find({ city: 'Boston' });
+    await createLocations(client).list({ state: 'MA' });
     await createSupporterGroups(client).create({ name: 'Core Team' });
 
     expect(client.post).toHaveBeenCalled();

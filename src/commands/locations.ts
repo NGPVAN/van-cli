@@ -40,31 +40,6 @@ const create = function(client: VanApiClientLike) {
     },
     
     /**
-     * Find locations by search criteria
-     * @param {Object} criteria - Search criteria
-     * @param {string} criteria.name - Location name
-     * @param {string} criteria.city - City name
-     * @param {string} criteria.state - State
-     * @param {string} criteria.zip - ZIP code
-     * @param {number} criteria.top - Number of results
-     * @param {number} criteria.skip - Number of results to skip
-     * @returns {Promise<Object>} Search results
-     */
-    async find(criteria = {}) {
-      const params = {
-        $top: criteria.top || 50,
-        $skip: criteria.skip || 0
-      };
-      
-      if (criteria.name) params.name = criteria.name;
-      if (criteria.city) params.city = criteria.city;
-      if (criteria.state) params.state = criteria.state;
-      if (criteria.zip) params.zip = criteria.zip;
-      
-      return client.get('/locations/find', params);
-    },
-    
-    /**
      * Create a new location
      * @param {Object} locationData - Location data
      * @param {string} locationData.name - Location name (required)
