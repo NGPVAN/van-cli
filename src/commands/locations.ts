@@ -61,7 +61,7 @@ const create = function(client: VanApiClientLike) {
       if (criteria.state) params.state = criteria.state;
       if (criteria.zip) params.zip = criteria.zip;
       
-      return client.get('/locations/find', params);
+      return client.get('/locations', params);
     },
     
     /**
