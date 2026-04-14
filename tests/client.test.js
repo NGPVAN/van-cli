@@ -69,12 +69,19 @@ describe('VanApiClient', () => {
   it('covers api key mode normalization and non-retry errors', async () => {
     const modeZero = new VanApiClient({ apiKey: 'abc|0' });
     expect(modeZero.databaseMode).toBe(0);
+    expect(modeZero.apiKey).toBe('abc|0');
 
     const invalidMode = new VanApiClient({ apiKey: 'abc|9' });
     expect(invalidMode.databaseMode).toBe(1);
+    expect(invalidMode.apiKey).toBe('abc|9');
 
     const noMode = new VanApiClient({ apiKey: 'abc' });
     expect(noMode.databaseMode).toBe(1);
+    expect(noMode.apiKey).toBe('abc|1');
+
+    const blankMode = new VanApiClient({ apiKey: 'abc|' });
+    expect(blankMode.databaseMode).toBe(1);
+    expect(blankMode.apiKey).toBe('abc|1');
 
     mockHttp.get.mockRejectedValueOnce({ response: { status: 400, data: { errors: [{ text: 'Bad request' }] } } });
     await expect(noMode.get('/people')).rejects.toBeDefined();

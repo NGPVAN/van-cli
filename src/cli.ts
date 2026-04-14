@@ -47,10 +47,11 @@ function getClient() {
     const resolved = resolveProfile();
     if (!resolved) {
       console.error(chalk.red('Error: No API key found. Provide one via:'));
-      console.error(chalk.yellow('  --profile <name>     Use a named profile from ~/.van/config'));
+      console.error(chalk.yellow('  --profile <name>     Use a named profile from ./.van/config or ~/.van/config'));
       console.error(chalk.yellow('  VAN_PROFILE=<name>   Environment variable for profile'));
       console.error(chalk.yellow('  VAN_API_KEY=<key>    Environment variable for API key'));
-      console.error(chalk.yellow('  ~/.van/config        [default] section'));
+      console.error(chalk.yellow('  ./.van/config        Project-local [default] section (if present)'));
+      console.error(chalk.yellow('  ~/.van/config        Home-directory [default] section'));
       process.exit(1);
     }
 
@@ -370,7 +371,7 @@ program
   .option('--json <payload>', 'Raw JSON object to merge with CLI options (CLI flags take precedence)')
   .option('--dry-run', 'Print the HTTP request that would be made without executing it')
   .option('--fields <keys>', 'Comma-separated list of fields to include in the output')
-  .option('--profile <name>', 'Use a named profile from ~/.van/config (overrides VAN_PROFILE env)');
+  .option('--profile <name>', 'Use a named profile from ./.van/config or ~/.van/config (overrides VAN_PROFILE env)');
 
 const internalCompleteCmd = new Command('__complete');
 internalCompleteCmd
@@ -1390,7 +1391,7 @@ import {
 
 const configCmd = program
   .command('config')
-  .description('Manage CLI configuration profiles (~/.van/config)');
+  .description('Manage CLI configuration profiles (./.van/config when present, otherwise ~/.van/config)');
 
 configCmd
   .command('list')

@@ -13,7 +13,16 @@ export interface ConfigData {
 }
 
 export function getConfigPath(): string {
-  return process.env.VAN_CONFIG_PATH || path.join(os.homedir(), '.van', 'config');
+  if (process.env.VAN_CONFIG_PATH) {
+    return process.env.VAN_CONFIG_PATH;
+  }
+
+  const localConfigPath = path.join(process.cwd(), '.van', 'config');
+  if (fs.existsSync(localConfigPath)) {
+    return localConfigPath;
+  }
+
+  return path.join(os.homedir(), '.van', 'config');
 }
 
 export function parseIni(text: string): ConfigData {

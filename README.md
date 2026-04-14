@@ -5,7 +5,7 @@ A CLI wrapper for the NGP VAN API for human 🧬 and agentic 🤖 use.
 ## Requirements
 
 - Node.js 18+
-- `VAN_API_KEY` environment variable
+- `VAN_API_KEY` environment variable, or a profile in `./.van/config` or `~/.van/config`
 - Optional `VAN_APP_NAME` (defaults to `default_user`)
 
 ## Setup
@@ -13,6 +13,9 @@ A CLI wrapper for the NGP VAN API for human 🧬 and agentic 🤖 use.
 ```bash
 export VAN_API_KEY="your-api-key|1"
 export VAN_APP_NAME="your-app-name"
+
+# If the database mode suffix is omitted, van-cli assumes MyCampaign (|1)
+export VAN_API_KEY="your-api-key"
 ```
 
 ## Quickstart: Install and Run the CLI
@@ -30,6 +33,8 @@ npm link
 # 4) Set required auth variables in your shell
 export VAN_API_KEY="your-api-key|1"
 export VAN_APP_NAME="your-app-name"
+
+# or use a project-local ./.van/config first, falling back to ~/.van/config
 
 # 5) Confirm the CLI is available
 van --help
@@ -54,6 +59,28 @@ eval "$(van completion bash)"
 ```
 
 To make it persistent, add the command for your shell to `~/.zshrc` or `~/.bashrc`.
+
+## Config files
+
+van-cli resolves config in this order:
+
+1. `VAN_CONFIG_PATH`
+2. `./.van/config` when present in the current working directory
+3. `~/.van/config`
+
+Example:
+
+```ini
+[default]
+api_key = your-api-key|1
+app_name = your-app-name
+
+[profile prod]
+api_key = your-prod-api-key
+app_name = prod-app
+```
+
+If an API key omits the mode suffix, van-cli assumes MyCampaign (`|1`).
 
 ## Scripts
 
