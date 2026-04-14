@@ -190,23 +190,44 @@ describe('maskApiKey', () => {
 });
 
 describe('getConfigPath', () => {
-  it('uses VAN_CONFIG_PATH env when set', () => {
-    const original = process.env.VAN_CONFIG_PATH;
-    process.env.VAN_CONFIG_PATH = '/custom/path/config';
-    expect(getConfigPath()).toBe('/custom/path/config');
-    if (original === undefined) {
-      delete process.env.VAN_CONFIG_PATH;
-    } else {
-      process.env.VAN_CONFIG_PATH = original;
-    }
+  let originalConfigPath;
+  let originalCwd;
+  let tmpDir;
+
+  beforeEach(() => {
+    originalConfigPath = process.env.VAN_CONFIG_PATH;
+    originalCwd = process.cwd();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'van-config-path-test-'));
+    process.chdir(tmpDir);
   });
 
-  it('defaults to ~/.van/config', () => {
-    const original = process.env.VAN_CONFIG_PATH;
+  afterEach(() => {
+    process.chdir(originalCwd);
+    if (originalConfigPath === undefined) {
+      delete process.env.VAN_CONFIG_PATH;
+    } else {
+      process.env.VAN_CONFIG_PATH = originalConfigPath;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('uses VAN_CONFIG_PATH env when set', () => {
+    process.env.VAN_CONFIG_PATH = '/custom/path/config';
+    expect(getConfigPath()).toBe('/custom/path/config');
+  });
+
+  it('uses ./.van/config when present in the current directory', () => {
+    const localConfigDir = path.join(tmpDir, '.van');
+    const localConfigPath = path.join(localConfigDir, 'config');
+    fs.mkdirSync(localConfigDir, { recursive: true });
+    fs.writeFileSync(localConfigPath, '[default]\napi_key = local-key\n');
+
+    delete process.env.VAN_CONFIG_PATH;
+    expect(fs.realpathSync(getConfigPath())).toBe(fs.realpathSync(localConfigPath));
+  });
+
+  it('defaults to ~/.van/config when no local config exists', () => {
     delete process.env.VAN_CONFIG_PATH;
     expect(getConfigPath()).toBe(path.join(os.homedir(), '.van', 'config'));
-    if (original !== undefined) {
-      process.env.VAN_CONFIG_PATH = original;
-    }
   });
 });

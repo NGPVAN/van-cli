@@ -31,6 +31,24 @@ function getRetryDelayMs(attempt: number, retryAfterHeader?: string, baseDelayMs
   return Math.min(baseDelayMs * (2 ** attempt), 10_000);
 }
 
+function withDefaultDatabaseMode(apiKey: string): string {
+  const trimmedApiKey = apiKey.trim();
+  if (!trimmedApiKey) {
+    return trimmedApiKey;
+  }
+
+  const parts = trimmedApiKey.split('|');
+  if (parts.length === 1) {
+    return `${trimmedApiKey}|1`;
+  }
+
+  if (parts.length === 2 && parts[1].trim() === '') {
+    return `${parts[0]}|1`;
+  }
+
+  return trimmedApiKey;
+}
+
 function normalizeApiKeyMode(apiKey: string): number {
   const parts = apiKey.split('|');
   if (parts.length !== 2) {
@@ -61,7 +79,7 @@ export class VanApiClient implements VanApiClientLike {
       ? { apiKey: options, appName }
       : options;
 
-    this.apiKey = normalizedOptions.apiKey ?? process.env.VAN_API_KEY ?? '';
+    this.apiKey = withDefaultDatabaseMode(normalizedOptions.apiKey ?? process.env.VAN_API_KEY ?? '');
     this.appName = normalizedOptions.appName ?? process.env.VAN_APP_NAME ?? 'default_user';
     this.baseURL = normalizedOptions.baseURL ?? DEFAULT_BASE_URL;
     this.timeoutMs = normalizedOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS;
