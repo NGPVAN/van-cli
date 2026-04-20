@@ -21,7 +21,7 @@
     "dev": "node dist/cli.js",
     "test": "npm run build && jest --runInBand",
     "test:coverage": "npm run build && jest --coverage --runInBand",
-    "prepack": "npm run clean && npm run build"
+    "prepack": "npm run clean && tsc -p tsconfig.build.json"
   },
   "keywords": [
     "ngp",

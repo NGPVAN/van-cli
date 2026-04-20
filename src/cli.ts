@@ -1,9 +1,8 @@
-// @ts-nocheck
-
 import { Command, program } from 'commander';
 import chalk from 'chalk';
 import VanApiClient from './client';
 import { version } from '../package.json';
+import { VanApiError } from './errors';
 import { getProfile, checkConfigPermissions } from './config';
 
 const isCompletionMode = process.argv.includes('completion') || process.argv.includes('__complete');
@@ -143,42 +142,42 @@ function outputResult(data: unknown, options: Record<string, unknown> = {}) {
 }
 
 // Error handler
-function handleError(error) {
-  if (error.status && error.details) {
-    console.error(chalk.red(`VAN API Error (${error.status}):`));
-    console.error(chalk.red(JSON.stringify(error.details, null, 2)));
-  } else {
+function handleError(error: unknown) {
+  if (error instanceof VanApiError) {
+    console.error(chalk.red(`VAN API Error (${error.status}): ${error.message}`));
+  } else if (error instanceof Error) {
     console.error(chalk.red(`Error: ${error.message}`));
+  } else {
+    console.error(chalk.red('An unexpected error occurred.'));
   }
   process.exit(1);
 }
 
-function parseGlobalJsonPayload(options) {
+function parseGlobalJsonPayload(options: Record<string, unknown>) {
   const raw = options.json;
   if (!raw) return {};
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw as string);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       throw new Error('--json value must be a JSON object');
     }
-    return parsed;
-  } catch (error) {
+    return parsed as Record<string, unknown>;
+  } catch {
     console.error(chalk.red(`Invalid JSON in --json flag.`));
-    console.error(chalk.yellow(`Received: ${raw}`));
     console.error(chalk.yellow(`Tip: Ensure your JSON is properly quoted. Example: --json '{"firstName":"John"}'`));
     process.exit(1);
   }
 }
 
-function parseJsonPayload(options) {
+function parseJsonPayload(options: Record<string, unknown>) {
   const raw = options.data || options.json;
   if (!raw) {
     throw new Error('JSON payload is required. Pass --data "{...}"');
   }
   try {
-    return JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`Invalid JSON payload: ${error.message}`);
+    return JSON.parse(raw as string) as Record<string, unknown>;
+  } catch {
+    throw new Error('Invalid JSON payload. Ensure the value is valid JSON.');
   }
 }
 
@@ -202,6 +201,48 @@ function validatePositiveInt(value: string, label: string): number {
     process.exit(1);
   }
   return num;
+}
+
+function validateDate(value: string, label: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    console.error(chalk.red(`Error: ${label} must be a valid date in YYYY-MM-DD format, got: "${value}"`));
+    process.exit(1);
+  }
+  const parsed = new Date(value + 'T00:00:00');
+  if (Number.isNaN(parsed.getTime())) {
+    console.error(chalk.red(`Error: ${label} is not a valid date: "${value}"`));
+    process.exit(1);
+  }
+  return value;
+}
+
+function validateWebhookUrl(value: string, label: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    console.error(chalk.red(`Error: ${label} must be a valid URL, got: "${value}"`));
+    process.exit(1);
+  }
+  if (parsed.protocol !== 'https:') {
+    console.error(chalk.red(`Error: ${label} must use HTTPS`));
+    process.exit(1);
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const privatePatterns = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
+  const privateRanges = ['10.', '192.168.', '169.254.'];
+  if (
+    privatePatterns.includes(hostname) ||
+    privateRanges.some(prefix => hostname.startsWith(prefix)) ||
+    hostname.startsWith('172.') && (() => {
+      const second = parseInt(hostname.split('.')[1], 10);
+      return second >= 16 && second <= 31;
+    })()
+  ) {
+    console.error(chalk.red(`Error: ${label} must not point to a private/internal address`));
+    process.exit(1);
+  }
+  return value;
 }
 
 // Levenshtein distance for fuzzy matching
@@ -237,15 +278,15 @@ function suggestClosest(input: string, candidates: string[], maxDistance = 3): s
   return best;
 }
 
-function optionTakesValue(option) {
+function optionTakesValue(option: { required: unknown; optional: unknown }) {
   return Boolean(option.required || option.optional);
 }
 
-function findSubcommand(command, token) {
-  return command.commands.find(sub => sub.name() === token || sub.aliases().includes(token));
+function findSubcommand(command: Command, token: string) {
+  return command.commands.find((sub: Command) => sub.name() === token || sub.aliases().includes(token));
 }
 
-function getCompletionCandidates(command, words) {
+function getCompletionCandidates(command: Command, words: string[]) {
   const tokens = Array.isArray(words) ? words : [];
   const current = tokens.length > 0 ? tokens[tokens.length - 1] : '';
   const consumed = tokens.slice(0, -1);
@@ -277,8 +318,8 @@ function getCompletionCandidates(command, words) {
   }
 
   const subcommands = currentCommand.commands
-    .filter(sub => !sub._hidden)
-    .map(sub => sub.name());
+    .filter((sub: Command & { _hidden?: boolean }) => !sub._hidden)
+    .map((sub: Command) => sub.name());
 
   const options = currentCommand.options.flatMap(option => {
     const entries = [];
@@ -301,14 +342,14 @@ function getCompletionCandidates(command, words) {
 function buildSchemaData() {
   const resources: Record<string, Record<string, unknown>> = {};
 
-  for (const cmd of program.commands) {
+  for (const cmd of program.commands as (Command & { _hidden?: boolean })[]) {
     if (cmd._hidden || ['completion', 'schema', 'config'].includes(cmd.name())) continue;
     const resourceName = cmd.name();
     const actions: Record<string, unknown> = {};
 
     // If the command has subcommands, introspect each
     if (cmd.commands && cmd.commands.length > 0) {
-      for (const sub of cmd.commands) {
+      for (const sub of cmd.commands as (Command & { _hidden?: boolean })[]) {
         if (sub._hidden) continue;
         actions[sub.name()] = extractCommandSchema(sub);
       }
@@ -325,15 +366,15 @@ function buildSchemaData() {
   return resources;
 }
 
-function extractCommandSchema(cmd) {
+function extractCommandSchema(cmd: Command) {
   const schema: Record<string, unknown> = {
     description: cmd.description(),
   };
 
   // Arguments
-  const args = cmd._args || cmd.registeredArguments || [];
+  const args = cmd.registeredArguments ?? [];
   if (args.length > 0) {
-    schema.arguments = args.map(arg => ({
+    schema.arguments = args.map((arg: { name(): string; required: boolean; description: string }) => ({
       name: arg.name(),
       required: arg.required,
       description: arg.description || undefined,
@@ -341,10 +382,11 @@ function extractCommandSchema(cmd) {
   }
 
   // Options
+  const skipFlags = ['--pretty', '--json', '--dry-run', '--fields', '--profile', '-V', '--version', '-h', '--help'];
   const options = cmd.options.filter(opt => {
     // Skip inherited global options
-    return !['--pretty', '--json', '--dry-run', '--fields', '--profile', '-V', '--version', '-h', '--help'].includes(opt.long) &&
-           !['--pretty', '--json', '--dry-run', '--fields', '--profile', '-V', '--version', '-h', '--help'].includes(opt.short);
+    return !skipFlags.includes(opt.long ?? '') &&
+           !skipFlags.includes(opt.short ?? '');
   });
   if (options.length > 0) {
     schema.options = options.map(opt => {
@@ -498,7 +540,7 @@ peopleCmd
   .action(async (vanId, options) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const params = {};
+      const params: Record<string, unknown> = {};
       if (options.expand) {
         params.$expand = options.expand;
       }
@@ -567,7 +609,7 @@ peopleCmd
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
 
-      const params = {
+      const params: Record<string, unknown> = {
         $top: merged.top,
         $skip: merged.skip
       };
@@ -582,7 +624,7 @@ peopleCmd
       if (merged.phoneNumber) params.phoneNumber = merged.phoneNumber;
       if (merged.phone) params.phoneNumber = merged.phone;
       if (merged.email) params.email = merged.email;
-      if (merged.dateOfBirth) params.dateOfBirth = merged.dateOfBirth;
+      if (merged.dateOfBirth) params.dateOfBirth = validateDate(merged.dateOfBirth as string, 'dateOfBirth');
       if (merged.employer) params.employer = merged.employer;
       if (merged.occupation) params.occupation = merged.occupation;
       if (merged.commonName) params.commonName = merged.commonName;
@@ -608,7 +650,7 @@ peopleCmd
   .option('--expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         name: options.name,
         $top: options.top,
         $skip: options.skip
@@ -636,7 +678,7 @@ peopleCmd
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
 
-      const data = {
+      const data: Record<string, unknown> = {
         firstName: merged.firstName,
         lastName: merged.lastName
       };
@@ -663,7 +705,7 @@ activistCodesCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -686,7 +728,7 @@ surveyQuestionsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -711,13 +753,13 @@ eventsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
 
-      if (options.startDate) params.startDate = options.startDate;
-      if (options.endDate) params.endDate = options.endDate;
+      if (options.startDate) params.startDate = validateDate(options.startDate, 'startDate');
+      if (options.endDate) params.endDate = validateDate(options.endDate, 'endDate');
 
       const events = await getClient().get('/events', params);
       outputResult(events, program.opts());
@@ -766,7 +808,7 @@ savedListsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: Math.min(options.top, 100), // VAN limits saved lists to 100
         $skip: options.skip
       };
@@ -819,11 +861,11 @@ exportJobsCmd
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data = {
+      const data: Record<string, unknown> = {
         savedListId: merged.savedListId
       };
 
-      if (merged.webhookUrl) data.webhookUrl = merged.webhookUrl;
+      if (merged.webhookUrl) data.webhookUrl = validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl');
 
       const job = await getClient().post('/exportJobs', data);
       outputResult(job, globalOpts);
@@ -847,7 +889,7 @@ canvassResponsesCmd
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data = {
+      const data: Record<string, unknown> = {
         vanId: merged.vanId,
         resultCodeId: merged.resultCodeId
       };
@@ -876,7 +918,7 @@ notesCmd
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data = {
+      const data: Record<string, unknown> = {
         vanId: merged.vanId,
         text: merged.text
       };
@@ -933,13 +975,13 @@ contributionsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
 
-      if (options.startDate) params.startDate = options.startDate;
-      if (options.endDate) params.endDate = options.endDate;
+      if (options.startDate) params.startDate = validateDate(options.startDate, 'startDate');
+      if (options.endDate) params.endDate = validateDate(options.endDate, 'endDate');
       if (options.vanId) params.vanId = options.vanId;
 
       const contributions = await getClient().get('/contributions', params);
@@ -976,7 +1018,7 @@ signupsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1002,7 +1044,7 @@ signupsCmd
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data = {
+      const data: Record<string, unknown> = {
         eventId: merged.eventId,
         vanId: merged.vanId
       };
@@ -1057,7 +1099,7 @@ scoresCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1076,7 +1118,7 @@ scoresCmd
   .requiredOption('--value <value>', 'Score value', parseFloat)
   .action(async (options) => {
     try {
-      const data = {
+      const data: Record<string, unknown> = {
         scoreId: options.scoreId,
         value: options.value
       };
@@ -1101,7 +1143,7 @@ customFieldsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1129,7 +1171,7 @@ locationsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1155,7 +1197,7 @@ locationsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1185,7 +1227,7 @@ bulkImportCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1212,7 +1254,7 @@ changedEntityExportCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1236,12 +1278,12 @@ changedEntityExportCmd
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data = {
-        dateChangedFrom: merged.dateChangedFrom
+      const data: Record<string, unknown> = {
+        dateChangedFrom: validateDate(merged.dateChangedFrom as string, 'dateChangedFrom')
       };
 
-      if (merged.dateChangedTo) data.dateChangedTo = merged.dateChangedTo;
-      if (merged.webhookUrl) data.webhookUrl = merged.webhookUrl;
+      if (merged.dateChangedTo) data.dateChangedTo = validateDate(merged.dateChangedTo as string, 'dateChangedTo');
+      if (merged.webhookUrl) data.webhookUrl = validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl');
 
       const job = await getClient().post('/changedEntityExportJobs', data);
       outputResult(job, globalOpts);
@@ -1262,7 +1304,7 @@ contactTypesCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1285,7 +1327,7 @@ eventTypesCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1308,7 +1350,7 @@ supporterGroupsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params = {
+      const params: Record<string, unknown> = {
         $top: options.top,
         $skip: options.skip
       };
@@ -1328,7 +1370,7 @@ supporterGroupsCmd
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data = {
+      const data: Record<string, unknown> = {
         name: merged.name
       };
 

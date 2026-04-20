@@ -2,3 +2,5 @@ node_modules
 dist
 coverage
 .npm
+.env
+.env.*
