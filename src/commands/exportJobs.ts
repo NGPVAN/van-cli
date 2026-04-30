@@ -38,17 +38,26 @@ const create = function(client: VanApiClientLike) {
      * Create a new export job
      * @param {Object} jobData - Export job data
      * @param {number} jobData.savedListId - Saved list ID to export (required)
-     * @param {string} jobData.webhookUrl - Webhook URL for completion notification
-     * @param {Array} jobData.fields - Array of field names to include in export
-     * @param {string} jobData.format - Export format (csv, tsv, etc.)
+     * @param {number} jobData.type - Export job type ID (required by API; use 4 for SavedListExport)
+     * @param {string} jobData.webhookUrl - Webhook URL for completion notification (required by API)
+     * @param {Array} jobData.districtFieldIds - District fields to include in export
+     * @param {Array} jobData.customFieldIds - Custom fields to include in export
      * @returns {Promise<Object>} Created export job object
      */
     async create(jobData) {
       if (!jobData.savedListId) {
         throw new Error("Required field 'savedListId' is missing");
       }
-      
-      return client.post('/exportJobs', jobData);
+
+      // The VAN API requires `type` as an integer export job type ID.
+      // GET /v4/exportJobTypes returns the available types; 4 = "SavedListExport" is
+      // the only type available in standard MyCampaign databases.
+      const payload = {
+        type: 4,
+        ...jobData,
+      };
+
+      return client.post('/exportJobs', payload);
     },
     
     /**
