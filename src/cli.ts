@@ -854,18 +854,19 @@ const exportJobsCmd = program
 
 exportJobsCmd
   .command('create')
-  .description('Create an export job')
+  .description('Create an export job for a saved list. Triggers an async export; the response includes a downloadUrl valid for ~7 hours.')
   .requiredOption('-s, --savedListId <id>', 'Saved list ID to export', parseInt)
-  .option('-w, --webhookUrl <url>', 'Webhook URL for completion notification')
+  .requiredOption('-w, --webhookUrl <url>', 'Webhook URL for completion notification (must be a reachable public HTTPS URL)')
+  .option('--type <id>', 'Export job type ID (default: 4 = SavedListExport, the only standard type)', val => parseInt(val, 10), 4)
   .action(async (options) => {
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
       const data: Record<string, unknown> = {
-        savedListId: merged.savedListId
+        savedListId: merged.savedListId,
+        type: merged.type,
+        webhookUrl: validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl'),
       };
-
-      if (merged.webhookUrl) data.webhookUrl = validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl');
 
       const job = await getClient().post('/exportJobs', data);
       outputResult(job, globalOpts);

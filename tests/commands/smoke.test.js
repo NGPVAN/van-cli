@@ -33,7 +33,7 @@ describe('command module wiring tests', () => {
     await createPeople(client).findOrCreate({ firstName: 'Jane', lastName: 'Doe' });
     await createEvents(client).list({ top: 10, skip: 0 });
     await createSavedLists(client).addPerson(12, 34);
-    await createExportJobs(client).create({ savedListId: 11 });
+    await createExportJobs(client).create({ savedListId: 11, webhookUrl: 'https://hooks.example.com/van' });
     await createContributions(client).get(9);
     await createSignups(client).create({ eventId: 4, vanId: 5 });
     await createNotes(client).create({ vanId: 4, text: 'note' });
@@ -48,6 +48,22 @@ describe('command module wiring tests', () => {
 
     expect(client.post).toHaveBeenCalled();
     expect(client.get).toHaveBeenCalled();
+  });
+
+  it('export-jobs create always includes type:4 in the POST body', async () => {
+    await createExportJobs(client).create({ savedListId: 42, webhookUrl: 'https://hooks.example.com/van' });
+
+    expect(client.post).toHaveBeenCalledWith('/exportJobs', expect.objectContaining({
+      savedListId: 42,
+      type: 4,
+      webhookUrl: 'https://hooks.example.com/van',
+    }));
+  });
+
+  it('export-jobs create respects a caller-supplied type', async () => {
+    await createExportJobs(client).create({ savedListId: 42, type: 7, webhookUrl: 'https://hooks.example.com/van' });
+
+    expect(client.post).toHaveBeenCalledWith('/exportJobs', expect.objectContaining({ type: 7 }));
   });
 
   it('maps people quickSearch params to /people/quickSearch', async () => {
