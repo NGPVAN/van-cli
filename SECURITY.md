@@ -10,7 +10,7 @@ discussions, or pull requests.**
 
 Instead, report them privately by email to:
 
-**security_report@ngpvan.com**
+**security@ngpvan.com**
 
 If possible, please include the following information in your report:
 
@@ -67,7 +67,7 @@ We support good-faith security research and will not pursue or support legal
 action against researchers who:
 
 - Make a good-faith effort to comply with this policy;
-- Report the vulnerability promptly to `security_report@ngpvan.com` and do not
+- Report the vulnerability promptly to `security@ngpvan.com` and do not
   disclose it to others before we have had a reasonable opportunity to remediate;
 - Avoid privacy violations, destruction of data, degradation of service, and
   disruption to production systems or to the experience of other users;
@@ -91,7 +91,7 @@ This safe harbor applies only to the `van-cli` project and other systems
 explicitly listed in scope. It does not authorize testing against third-party
 services, NGP VAN production environments not owned by you, or any system for
 which you do not have authorization. If in doubt about whether your testing is
-in scope, please ask us first at `security_report@ngpvan.com`.
+in scope, please ask us first at `security@ngpvan.com`.
 
 If legal action is initiated by a third party against you for activity that
 complied with this policy, we will make this authorization known.
@@ -111,4 +111,4 @@ The following are generally **not** considered vulnerabilities under this policy
 
 ## Questions
 
-For any questions about this policy, contact `security_report@ngpvan.com`.
+For any questions about this policy, contact `security@ngpvan.com`.
