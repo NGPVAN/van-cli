@@ -1,26 +1,27 @@
-const axios = require('axios');
-
-jest.mock('axios', () => ({
-  create: jest.fn(),
-}));
-
 const { VanApiClient } = require('../dist/index');
 const { VanApiError } = require('../dist/errors');
 
+function jsonResponse(status, body, headers = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+    text: () => Promise.resolve(body === null ? '' : JSON.stringify(body)),
+  };
+}
+
 describe('VanApiClient', () => {
-  let mockHttp;
+  let originalFetch;
+  let mockFetch;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockHttp = {
-      get: jest.fn(),
-      post: jest.fn(),
-      put: jest.fn(),
-      delete: jest.fn(),
-      interceptors: { response: { use: jest.fn() } },
-    };
+    originalFetch = globalThis.fetch;
+    mockFetch = jest.fn();
+    globalThis.fetch = mockFetch;
+  });
 
-    axios.create.mockReturnValue(mockHttp);
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
   it('requires VAN_API_KEY', () => {
@@ -33,21 +34,28 @@ describe('VanApiClient', () => {
   it('supports basic HTTP and pagination behavior', async () => {
     const client = new VanApiClient({ apiKey: 'abc|1', retryBaseDelayMs: 1 });
 
-    mockHttp.get.mockResolvedValue({ data: { ok: true } });
-    mockHttp.post.mockResolvedValue({ data: { id: 1 } });
-    mockHttp.put.mockResolvedValue({ data: { updated: true } });
-    mockHttp.delete.mockResolvedValue({ data: null });
-
+    mockFetch.mockResolvedValueOnce(jsonResponse(200, { ok: true }));
     await expect(client.get('/people')).resolves.toEqual({ ok: true });
+
+    mockFetch.mockResolvedValueOnce(jsonResponse(200, { id: 1 }));
     await expect(client.post('/people', { firstName: 'A' })).resolves.toEqual({ id: 1 });
+
+    mockFetch.mockResolvedValueOnce(jsonResponse(200, { updated: true }));
     await expect(client.put('/people/1', { lastName: 'B' })).resolves.toEqual({ updated: true });
+
+    mockFetch.mockResolvedValueOnce(jsonResponse(200, null));
     await expect(client.delete('/people/1')).resolves.toBeNull();
 
+    mockFetch.mockResolvedValueOnce(jsonResponse(200, {}));
     await client.getPaginated('/people', { top: 10, skip: 5 });
-    expect(mockHttp.get).toHaveBeenCalledWith('/people', { params: { $top: 10, $skip: 5 } });
+    const lastCallUrl = mockFetch.mock.calls.at(-1)[0];
+    expect(lastCallUrl).toContain('/people?');
+    expect(lastCallUrl).toContain('%24top=10');
+    expect(lastCallUrl).toContain('%24skip=5');
 
-    mockHttp.get.mockResolvedValueOnce({ data: { items: [{ id: 1 }, { id: 2 }] } })
-      .mockResolvedValueOnce({ data: { items: [] } });
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(200, { items: [{ id: 1 }, { id: 2 }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { items: [] }));
     const all = await client.getAllPaginated('/people', { top: 2 }, 10);
     expect(all).toEqual([{ id: 1 }, { id: 2 }]);
   });
@@ -55,15 +63,16 @@ describe('VanApiClient', () => {
   it('retries 429s and maps api errors', async () => {
     const client = new VanApiClient({ apiKey: 'abc|1', retryBaseDelayMs: 1 });
 
-    mockHttp.get
-      .mockRejectedValueOnce({ response: { status: 429, headers: { 'retry-after': '0' }, data: {} } })
-      .mockResolvedValueOnce({ data: { ok: true } });
-
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(429, {}, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
     await expect(client.get('/people')).resolves.toEqual({ ok: true });
 
-    const interceptor = mockHttp.interceptors.response.use.mock.calls[0][1];
-    expect(() => interceptor({ response: { status: 403, data: { errors: [{ text: 'Forbidden' }] } } })).toThrow(VanApiError);
-    expect(() => interceptor({ request: {} })).toThrow(/Network error/);
+    mockFetch.mockResolvedValueOnce(jsonResponse(403, { errors: [{ text: 'Forbidden' }] }));
+    await expect(client.get('/people')).rejects.toBeInstanceOf(VanApiError);
+
+    mockFetch.mockRejectedValueOnce(new Error('connection refused'));
+    await expect(client.get('/people')).rejects.toThrow(/Network error/);
   });
 
   it('covers api key mode normalization and non-retry errors', async () => {
@@ -83,7 +92,7 @@ describe('VanApiClient', () => {
     expect(blankMode.databaseMode).toBe(1);
     expect(blankMode.apiKey).toBe('abc|1');
 
-    mockHttp.get.mockRejectedValueOnce({ response: { status: 400, data: { errors: [{ text: 'Bad request' }] } } });
+    mockFetch.mockResolvedValueOnce(jsonResponse(400, { errors: [{ text: 'Bad request' }] }));
     await expect(noMode.get('/people')).rejects.toBeDefined();
   });
 });

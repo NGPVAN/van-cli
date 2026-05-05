@@ -1,4 +1,3 @@
-import axios, { AxiosError, AxiosInstance, AxiosResponse } from 'axios';
 import { version } from '../package.json';
 import { VanApiError } from './errors';
 import type { VanApiClientLike, VanApiClientOptions, VanParams, VanPayload } from './types';
@@ -63,6 +62,35 @@ function normalizeApiKeyMode(apiKey: string): number {
   return 1;
 }
 
+function buildQueryString(params: VanParams): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        search.append(key, String(item));
+      }
+    } else {
+      search.append(key, String(value));
+    }
+  }
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
+}
+
+function basicAuthHeader(username: string, password: string): string {
+  return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+}
+
+interface FetchLikeResponse {
+  ok: boolean;
+  status: number;
+  headers: { get(name: string): string | null };
+  text(): Promise<string>;
+}
+
+type FetchLike = (url: string, init: Record<string, unknown>) => Promise<FetchLikeResponse>;
+
 export class VanApiClient implements VanApiClientLike {
   apiKey: string;
   appName: string;
@@ -72,7 +100,6 @@ export class VanApiClient implements VanApiClientLike {
   maxRetries: number;
   retryBaseDelayMs: number;
   dryRun: boolean;
-  http: AxiosInstance;
 
   constructor(options: VanApiClientOptions | string = {}, appName?: string) {
     const normalizedOptions: VanApiClientOptions = typeof options === 'string'
@@ -92,57 +119,54 @@ export class VanApiClient implements VanApiClientLike {
     }
 
     this.databaseMode = normalizeApiKeyMode(this.apiKey);
-
-    this.http = axios.create({
-      baseURL: this.baseURL,
-      timeout: this.timeoutMs,
-      auth: {
-        username: this.appName,
-        password: this.apiKey,
-      },
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': `van-cli/${version}`,
-      },
-    });
-
-    this.http.interceptors.response.use(
-      (response) => response,
-      (error: AxiosError) => {
-        if (error.response) {
-          throw new VanApiError(error.response.status, error.response.data);
-        }
-
-        if (error.request) {
-          throw new Error('Network error: No response received from VAN API');
-        }
-
-        throw error;
-      },
-    );
   }
 
-  private async withRetry<T>(fn: () => Promise<AxiosResponse<T>>): Promise<T> {
+  private async request<T>(method: string, endpoint: string, params?: VanParams, body?: VanPayload): Promise<T> {
+    const url = `${this.baseURL}${endpoint}${params ? buildQueryString(params) : ''}`;
+    const headers: Record<string, string> = {
+      'Authorization': basicAuthHeader(this.appName, this.apiKey),
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'User-Agent': `van-cli/${version}`,
+    };
+
+    const init: Record<string, unknown> = { method, headers };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+
     let attempt = 0;
-
     while (true) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      init.signal = controller.signal;
+
+      let response: FetchLikeResponse;
       try {
-        const response = await fn();
-        return response.data;
+        const fetchFn = (globalThis as { fetch: FetchLike }).fetch;
+        response = await fetchFn(url, init);
       } catch (error) {
-        const err = error as AxiosError;
-        const status = err.response?.status;
-        const retryAfterHeader = err.response?.headers?.['retry-after'] as string | undefined;
-        const canRetry = isRetryableStatus(status) && attempt < this.maxRetries;
-
-        if (!canRetry) {
-          throw error;
-        }
-
-        const delay = getRetryDelayMs(attempt, retryAfterHeader, this.retryBaseDelayMs);
-        await sleep(delay);
-        attempt += 1;
+        clearTimeout(timeout);
+        throw new Error('Network error: No response received from VAN API');
       }
+      clearTimeout(timeout);
+
+      const text = await response.text();
+      const data = text ? safeJsonParse(text) : null;
+
+      if (response.ok) {
+        return data as T;
+      }
+
+      const retryAfterHeader = response.headers.get('retry-after') ?? undefined;
+      const canRetry = isRetryableStatus(response.status) && attempt < this.maxRetries;
+      if (!canRetry) {
+        throw new VanApiError(response.status, data);
+      }
+
+      const delay = getRetryDelayMs(attempt, retryAfterHeader, this.retryBaseDelayMs);
+      await sleep(delay);
+      attempt += 1;
     }
   }
 
@@ -156,22 +180,22 @@ export class VanApiClient implements VanApiClientLike {
 
   async get(endpoint: string, params: VanParams = {}): Promise<unknown> {
     if (this.dryRun) return this.dryRunResult('GET', endpoint, params);
-    return this.withRetry(() => this.http.get(endpoint, { params }));
+    return this.request('GET', endpoint, params);
   }
 
   async post(endpoint: string, data: VanPayload = {}): Promise<unknown> {
     if (this.dryRun) return this.dryRunResult('POST', endpoint, undefined, data);
-    return this.withRetry(() => this.http.post(endpoint, data));
+    return this.request('POST', endpoint, undefined, data);
   }
 
   async put(endpoint: string, data: VanPayload = {}): Promise<unknown> {
     if (this.dryRun) return this.dryRunResult('PUT', endpoint, undefined, data);
-    return this.withRetry(() => this.http.put(endpoint, data));
+    return this.request('PUT', endpoint, undefined, data);
   }
 
   async delete(endpoint: string): Promise<unknown> {
     if (this.dryRun) return this.dryRunResult('DELETE', endpoint);
-    return this.withRetry(() => this.http.delete(endpoint));
+    return this.request('DELETE', endpoint);
   }
 
   async getPaginated(endpoint: string, params: VanParams = {}): Promise<unknown> {
@@ -218,6 +242,14 @@ export class VanApiClient implements VanApiClientLike {
     }
 
     return results.slice(0, maxResults);
+  }
+}
+
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
 }
 
