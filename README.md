@@ -1,6 +1,8 @@
 # van-cli
 
-A CLI wrapper for the NGP VAN API for human 🧬 and agentic 🤖 use. 
+> **Note:** This project is experimental and under active development, with significant improvements planned throughout 2026. Expect APIs and behavior to evolve. We'd love to hear how you're using it and any feedback you have — please send a note to [sunil.sadasivan@ngpvan.com](mailto:sunil.sadasivan@ngpvan.com).
+
+A CLI wrapper for the NGP VAN API.
 
 ## Requirements
 
