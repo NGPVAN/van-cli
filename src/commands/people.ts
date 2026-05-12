@@ -77,20 +77,14 @@ const create = function(client: VanApiClientLike) {
      * Fuzzy name search across people and organizations
      * @param {Object} criteria - Search criteria
      * @param {string} criteria.name - Name string to match
-     * @param {number} criteria.top - Number of results (max 50)
-     * @param {number} criteria.skip - Number of results to skip
-     * @param {string} criteria.$orderby - Sort expression (for example: Name)
      * @param {string} criteria.$expand - Comma-separated fields to expand
      * @returns {Promise<Object>} Search results
      */
     async quickSearch(criteria = {}) {
       const params = {
         name: criteria.name,
-        $top: Math.min(criteria.top || 50, 50),
-        $skip: criteria.skip || 0
       };
 
-      if (criteria.$orderby) params.$orderby = criteria.$orderby;
       if (criteria.$expand) params.$expand = criteria.$expand;
 
       return client.get('/people/quickSearch', params);

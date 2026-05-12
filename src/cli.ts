@@ -573,27 +573,6 @@ const peopleCmd = program
   .description('Manage people');
 
 peopleCmd
-  .command('expand-fields')
-  .description('List $expand fields for people endpoints')
-  .action(() => {
-    outputResult({
-      resource: 'people',
-      endpointExpandFields: {
-        '/people': PEOPLE_LIST_EXPANDS,
-        '/people/{vanId}': PEOPLE_GET_EXPANDS
-      },
-      notes: [
-        'Some expansions are endpoint and permission dependent.',
-        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
-      ],
-      sources: [
-        'https://docs.ngpvan.com/reference/peoplevanid-1',
-        'VAN API INVALID_PARAMETER hint for $expand on /people/{vanId}'
-      ]
-    }, program.opts());
-  });
-
-peopleCmd
   .command('get <vanId>')
   .description('Get a person by VAN ID')
   .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
@@ -704,19 +683,13 @@ peopleCmd
   .command('quick-search')
   .description('Fuzzy search people/orgs by a single name string')
   .requiredOption('-n, --name <name>', 'Name query (example: John Smith)')
-  .option('--top <count>', 'Number of results (max 50)', val => parseInt(val, 10), 50)
-  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .option('--orderby <expr>', 'OData $orderby expression (example: Name)')
   .option('--expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
   .action(async (options) => {
     try {
       const criteria: Record<string, unknown> = {
         name: options.name,
-        top: options.top,
-        skip: options.skip
       };
 
-      if (options.orderby) criteria.$orderby = options.orderby;
       if (options.expand) criteria.$expand = options.expand;
 
       const api = createPeople(getClient());
@@ -781,6 +754,27 @@ peopleCmd
     } catch (error) {
       handleError(error);
     }
+  });
+
+peopleCmd
+  .command('expand-fields')
+  .description('List $expand fields for people endpoints')
+  .action(() => {
+    outputResult({
+      resource: 'people',
+      endpointExpandFields: {
+        '/people': PEOPLE_LIST_EXPANDS,
+        '/people/{vanId}': PEOPLE_GET_EXPANDS
+      },
+      notes: [
+        'Some expansions are endpoint and permission dependent.',
+        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
+      ],
+      sources: [
+        'https://docs.ngpvan.com/reference/peoplevanid-1',
+        'VAN API INVALID_PARAMETER hint for $expand on /people/{vanId}'
+      ]
+    }, program.opts());
   });
 
 // --- Email ---
@@ -920,27 +914,6 @@ eventsCmd
   });
 
 eventsCmd
-  .command('expand-fields')
-  .description('List $expand fields for events endpoints')
-  .action(() => {
-    outputResult({
-      resource: 'events',
-      endpointExpandFields: {
-        '/events': EVENTS_LIST_EXPANDS,
-        '/events/{eventId}': EVENTS_GET_EXPANDS
-      },
-      notes: [
-        'Some expansions are endpoint and permission dependent.',
-        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
-      ],
-      sources: [
-        'https://docs.ngpvan.com/reference/events-overview',
-        'VAN API INVALID_PARAMETER hint for $expand on /events/{eventId}'
-      ]
-    }, program.opts());
-  });
-
-eventsCmd
   .command('get <eventId>')
   .description('Get an event by ID')
   .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van events expand-fields')
@@ -1037,6 +1010,27 @@ eventsCmd
     } catch (error) {
       handleError(error);
     }
+  });
+
+eventsCmd
+  .command('expand-fields')
+  .description('List $expand fields for events endpoints')
+  .action(() => {
+    outputResult({
+      resource: 'events',
+      endpointExpandFields: {
+        '/events': EVENTS_LIST_EXPANDS,
+        '/events/{eventId}': EVENTS_GET_EXPANDS
+      },
+      notes: [
+        'Some expansions are endpoint and permission dependent.',
+        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
+      ],
+      sources: [
+        'https://docs.ngpvan.com/reference/events-overview',
+        'VAN API INVALID_PARAMETER hint for $expand on /events/{eventId}'
+      ]
+    }, program.opts());
   });
 
 // --- Saved Lists ---
