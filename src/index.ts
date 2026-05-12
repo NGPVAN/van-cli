@@ -14,11 +14,10 @@ import createCustomFields from './commands/customFields';
 import createCodes from './commands/codes';
 import createTargets from './commands/targets';
 import createStories from './commands/stories';
-import createEmails from './commands/emails';
+import createEmails from './commands/email';
 import createBulkImport from './commands/bulkImport';
 import createChangedEntityExportJobs from './commands/changedEntityExportJobs';
 import createLocations from './commands/locations';
-import createContactTypes from './commands/contactTypes';
 import createEventTypes from './commands/eventTypes';
 import createSupporterGroups from './commands/supporterGroups';
 import type { VanApiClientOptions } from './types';
@@ -44,7 +43,6 @@ export class VanApi {
   bulkImport: ReturnType<typeof createBulkImport>;
   changedEntityExportJobs: ReturnType<typeof createChangedEntityExportJobs>;
   locations: ReturnType<typeof createLocations>;
-  contactTypes: ReturnType<typeof createContactTypes>;
   eventTypes: ReturnType<typeof createEventTypes>;
   supporterGroups: ReturnType<typeof createSupporterGroups>;
 
@@ -70,7 +68,6 @@ export class VanApi {
     this.bulkImport = createBulkImport(this.client);
     this.changedEntityExportJobs = createChangedEntityExportJobs(this.client);
     this.locations = createLocations(this.client);
-    this.contactTypes = createContactTypes(this.client);
     this.eventTypes = createEventTypes(this.client);
     this.supporterGroups = createSupporterGroups(this.client);
   }

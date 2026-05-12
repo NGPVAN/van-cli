@@ -22,6 +22,9 @@ const create = function(client: VanApiClientLike) {
         $skip: options.skip || 0
       };
       
+      if (options.vanId) {
+        return client.get(`/people/${options.vanId}/activistCodes`, params);
+      }
       return client.get('/activistCodes', params);
     },
     
@@ -33,41 +36,6 @@ const create = function(client: VanApiClientLike) {
     async get(activistCodeId) {
       return client.get(`/activistCodes/${activistCodeId}`);
     },
-    
-    /**
-     * Get all activist codes (automatically paginated)
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all activist codes
-     */
-    async getAll(maxResults = 1000) {
-      return client.getAllPaginated('/activistCodes', {}, maxResults);
-    },
-    
-    /**
-     * Apply an activist code to a person
-     * @param {number} vanId - Person's VAN ID
-     * @param {number} activistCodeId - Activist code ID
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object>} Response
-     */
-    async apply(vanId, activistCodeId, options = {}) {
-      const data = {
-        activistCodeId: activistCodeId,
-        ...options
-      };
-      
-      return client.post(`/people/${vanId}/activistCodes`, data);
-    },
-    
-    /**
-     * Remove an activist code from a person
-     * @param {number} vanId - Person's VAN ID
-     * @param {number} activistCodeId - Activist code ID
-     * @returns {Promise<Object>} Response
-     */
-    async remove(vanId, activistCodeId) {
-      return client.delete(`/people/${vanId}/activistCodes/${activistCodeId}`);
-    }
   };
 };
 

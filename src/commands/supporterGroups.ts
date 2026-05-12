@@ -81,11 +81,10 @@ const create = function(client: VanApiClientLike) {
     /**
      * Remove a person from a supporter group
      * @param {number} supporterGroupId - Supporter group ID
-     * @param {number} vanId - Person's VAN ID
      * @returns {Promise<Object>} Response
      */
-    async removePerson(supporterGroupId, vanId) {
-      return client.delete(`/supporterGroups/${supporterGroupId}/people/${vanId}`);
+    async delete(supporterGroupId) {
+      return client.delete(`/supporterGroups/${supporterGroupId}`);
     },
     
     /**

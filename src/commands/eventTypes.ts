@@ -22,7 +22,7 @@ const create = function(client: VanApiClientLike) {
         $skip: options.skip || 0
       };
       
-      return client.get('/eventTypes', params);
+      return client.get('/events/types', params);
     },
     
     /**
@@ -31,18 +31,8 @@ const create = function(client: VanApiClientLike) {
      * @returns {Promise<Object>} Event type object
      */
     async get(eventTypeId) {
-      return client.get(`/eventTypes/${eventTypeId}`);
+      return client.get(`/events/types/${eventTypeId}`);
     },
-    
-    /**
-     * Get all event types (automatically paginated)
-     * @param {Object} criteria - Filter criteria
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all event types
-     */
-    async getAll(criteria = {}, maxResults = 1000) {
-      return client.getAllPaginated('/eventTypes', criteria, maxResults);
-    }
   };
 };
 
