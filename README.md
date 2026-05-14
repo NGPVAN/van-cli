@@ -12,12 +12,42 @@ A CLI wrapper for the NGP VAN API.
 
 ## Setup
 
+Pick one of the following. If multiple are present, the resolution order is `--profile` flag > `VAN_PROFILE` env > `VAN_API_KEY` env > `./.van/config` > `~/.van/config`.
+
+### Option 1: Environment variables
+
 ```bash
 export VAN_API_KEY="your-api-key|1"
 export VAN_APP_NAME="your-app-name"
 
 # If the database mode suffix is omitted, van-cli assumes MyCampaign (|1)
 export VAN_API_KEY="your-api-key"
+```
+
+### Option 2: `van config add`
+
+```bash
+van config add mycommittee --api-key "your-api-key|1" --app-name "your-app-name"
+
+# Use it for a single command
+van people find --lastName Smith --profile mycommittee
+
+# Or promote it to the [default] section
+van config set-default mycommittee
+```
+
+### Option 3: Edit `~/.van/config` directly
+
+Create `~/.van/config` (or `./.van/config` for a project-local override):
+
+```ini
+[default]
+api_key = your-api-key|1
+app_name = your-app-name
+
+[profile mycommittee]
+api_key = your-other-api-key|1
+app_name = your-app-name
 ```
 
 ## Quickstart: Install and Run the CLI
