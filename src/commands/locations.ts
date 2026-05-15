@@ -123,7 +123,7 @@ const create = function(client: VanApiClientLike) {
         await client.delete(`/locations/${locationId}`);
         return `Location ${locationId} deleted`;
       } catch (error) {
-        throw new Error(`Failed to delete location ${locationId}`);
+        throw new Error(`Failed to delete location ${locationId}`, { cause: error });
       }
     },
   };

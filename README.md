@@ -161,12 +161,12 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 - `codes`: `list`, `listResultCodes`, `getResultCode`, `listContactTypes`, `getContactType`, `listInputTypes`, `getInputType`, `listSupporterGroups`, `getSupporterGroup`, `getAllResultCodes`, `getAllContactTypes`
 - `targets`: `list`, `get`, `create`, `update`, `delete`, `getPeople`, `addPerson`, `removePerson`, `getAll`
 - `stories`: `list`, `get`, `create`, `update`, `delete`, `getByPerson`, `getAll`
-- `email`: `list`, `get`
+- `targetedEmails`: `list`, `get`
 - `bulkImport`: `list`, `listJobs`, `getJob`, `createJob`, `uploadData`, `startJob`, `cancelJob`, `getJobResults`, `getJobErrors`, `getAllJobs`
 - `changedEntityExportJobs`: `list`, `get`, `create`, `getDownloadUrl`, `cancel`, `getStatus`, `getAll`
 - `locations`: `list`, `get`, `create`, `findOrCreate`, `delete`
 - `eventTypes`: `list`, `get`
-- `supporterGroups`: `list`, `get`, `create`, `update`, `addPerson`, `delete`, `getPeople`, `getAll`
+- `supporterGroups`: `list`, `get`, `create`, `addPerson`, `removePerson`, `delete`
 - `apiKeyProfiles`: `get`
 
 ### CLI support (current command coverage)
@@ -174,7 +174,6 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 The CLI currently implements a subset of SDK methods:
 
 - `people`: `expand-fields`, `get`, `list`, `quick-search`, `find-or-create`, `create`, `update`, `delete`
-- `email`: `list`, `get`
 - `activist-codes`: `list`, `get`
 - `survey-questions`: `list`, `get`
 - `events`: `list`, `expand-fields`, `get`, `create`, `update`, `delete`
@@ -188,10 +187,11 @@ The CLI currently implements a subset of SDK methods:
 - `scores`: `list`, `apply`
 - `custom-fields`: `list`
 - `locations`: `list`, `get`, `create`, `find-or-create`, `delete`
+- `targeted-emails`: `list`, `get`
 - `bulk-import`: `list`
 - `changed-entity-exports`: `list`, `create`
 - `event-types`: `list`, `get`
-- `supporter-groups`: `list`, `create`, `update`, `delete`
+- `supporter-groups`: `list`, `get`, `create`, `add-person`, `remove-person`, `delete`
 - `api-key-profiles`
 
 ## Robustness features

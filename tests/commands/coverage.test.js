@@ -1,4 +1,5 @@
 const createActivistCodes = require('../../dist/commands/activistCodes').default;
+const createApiKeyProfiles = require('../../dist/commands/apiKeyProfiles').default;
 const createBulkImport = require('../../dist/commands/bulkImport').default;
 const createCanvassResponses = require('../../dist/commands/canvassResponses').default;
 const createChangedEntityExportJobs = require('../../dist/commands/changedEntityExportJobs').default;
@@ -6,7 +7,8 @@ const createCodes = require('../../dist/commands/codes').default;
 const createContactTypes = require('../../dist/commands/contactTypes').default;
 const createContributions = require('../../dist/commands/contributions').default;
 const createCustomFields = require('../../dist/commands/customFields').default;
-const createEmails = require('../../dist/commands/emails').default;
+const createDesignations = require('../../dist/commands/designations').default;
+const createTargetedEmails = require('../../dist/commands/targetedEmails').default;
 const createEventTypes = require('../../dist/commands/eventTypes').default;
 const createEvents = require('../../dist/commands/events').default;
 const createExportJobs = require('../../dist/commands/exportJobs').default;
@@ -38,7 +40,7 @@ describe('command modules broad coverage', () => {
   test('people command methods', async () => {
     const people = createPeople(client);
     await people.get(123, { $expand: 'addresses' });
-    await people.find({
+    await people.list({
       firstName: 'Jane', lastName: 'Doe', middleName: 'Q',
       streetAddress: '1 Main', city: 'Falls Church', stateOrProvince: 'VA',
       zipOrPostalCode: '22043', phoneNumber: '5551112222', phone: '5553334444',
@@ -50,22 +52,18 @@ describe('command modules broad coverage', () => {
     await expect(people.findOrCreate({ firstName: 'Only' })).rejects.toThrow(/Required field 'lastName'/);
     await people.create({ firstName: 'Jane', lastName: 'Doe' });
     await people.update(123, { occupation: 'Engineer' });
+    await people.delete(123);
     await people.getAll({ firstName: 'J' }, 500);
   });
 
-  test('activist codes / survey questions / contact types / event types', async () => {
+  test('activist codes / survey questions / contact types / event types / api key profiles / designations', async () => {
     const activist = createActivistCodes(client);
     await activist.list({ top: 20, skip: 1, name: 'code', type: 'person' });
     await activist.get(5);
-    await activist.getAll(200);
-    await activist.apply(10, 20, { action: 'Apply', dateCanvassed: '2026-01-01', resultCodeId: 1, contactTypeId: 2, inputTypeId: 3 });
-    await activist.remove(10, 20);
 
     const survey = createSurveyQuestions(client);
     await survey.list({ top: 5, skip: 1 });
     await survey.get(99);
-    await survey.getAll(200);
-    await survey.recordResponse(10, { surveyQuestionId: 1, surveyResponseId: 2 });
 
     const contactTypes = createContactTypes(client);
     await contactTypes.list({ top: 10, skip: 2 });
@@ -75,28 +73,32 @@ describe('command modules broad coverage', () => {
     const eventTypes = createEventTypes(client);
     await eventTypes.list({ top: 10, skip: 2 });
     await eventTypes.get(7);
-    await eventTypes.getAll({}, 120);
+
+    const apiKeyProfiles = createApiKeyProfiles(client);
+    await apiKeyProfiles.get();
+
+    const designations = createDesignations(client);
+    await designations.list({ top: 10, skip: 1 });
+    await designations.get(1, { expand: 'committees' });
   });
 
   test('events / signups / notes / stories', async () => {
     const events = createEvents(client);
     await events.list({ top: 20, skip: 1, eventTypeId: 1, eventName: 'Townhall', startDate: '2026-01-01', endDate: '2026-01-31', city: 'Arlington', state: 'VA' });
     await events.get(11, { $expand: 'signups' });
-    await events.create({ name: 'Townhall', startDate: '2026-01-01', endDate: '2026-01-01', locationId: 1 });
+    await events.create({
+      eventTypeId: 1, name: 'Townhall', startDate: '2026-01-01', endDate: '2026-01-01',
+      locationId: 1, roleId: 2, shiftStartTime: '09:00', shiftEndTime: '17:00',
+    });
     await events.update(11, { name: 'Townhall 2' });
     await events.delete(11);
-    await events.getSignups(11, { top: 5, skip: 1 });
-    await events.getAll({ city: 'Arlington' }, 100);
 
     const signups = createSignups(client);
     await signups.list({ top: 10, skip: 1, eventId: 11, vanId: 100 });
     await signups.get(12);
-    await signups.create({ eventId: 11, vanId: 100, role: 'Attendee', status: 'Active' });
-    await signups.update(12, { status: 'Declined' });
+    await signups.create({ vanId: 100, eventId: 11, eventShiftId: 5, roleId: 2, statusId: 3, locationId: 1 });
+    await signups.update(12, { statusId: 4 });
     await signups.delete(12);
-    await signups.getByEvent(11, { top: 5, skip: 1 });
-    await signups.getByPerson(100, { top: 5, skip: 1 });
-    await signups.getAll({ eventId: 11 }, 1000);
 
     const notes = createNotes(client);
     await notes.list({ top: 10, skip: 1, vanId: 100 });
@@ -121,13 +123,6 @@ describe('command modules broad coverage', () => {
     const lists = createSavedLists(client);
     await lists.list({ top: 100, skip: 1 });
     await lists.get(1, { $expand: 'people' });
-    await lists.create({ name: 'List1', folderId: 3 });
-    await lists.update(1, { name: 'List2' });
-    await lists.delete(1);
-    await lists.getPeople(1, { top: 20, skip: 2 });
-    await lists.addPerson(1, 100);
-    await lists.removePerson(1, 100);
-    await lists.getAll(500);
 
     const targets = createTargets(client);
     await targets.list({ top: 50, skip: 2, targetType: 'Voter', name: 'Target' });
@@ -153,12 +148,10 @@ describe('command modules broad coverage', () => {
 
   test('remaining modules', async () => {
     const contrib = createContributions(client);
-    await contrib.list({ top: 10, skip: 1, startDate: '2026-01-01', endDate: '2026-02-01', vanId: 100 });
+    await contrib.list(100, { top: 10, skip: 1 });
     await contrib.get(1);
-    await contrib.create({ vanId: 100, amount: 25, dateReceived: '2026-01-01' });
+    await contrib.create({ vanId: 100, amount: 25, dateReceived: '2026-01-01', designationId: 1, status: 'Approved', paymentType: 'Check' });
     await contrib.update(1, { amount: 30 });
-    await contrib.getByPerson(100, { top: 5, skip: 1 });
-    await contrib.getAll({ vanId: 100 }, 500);
 
     const customFields = createCustomFields(client);
     await customFields.list({ top: 10, skip: 2, fieldType: 'Text' });
@@ -169,15 +162,9 @@ describe('command modules broad coverage', () => {
     await customFields.updateValue(100, 4, 'def', { source: 'api' });
     await customFields.removeValue(100, 4);
 
-    const emails = createEmails(client);
-    await emails.list({ top: 10, skip: 1, folderId: 1, status: 'Draft' });
-    await emails.get(2);
-    await emails.create({ name: 'E1', subject: 'Hi', body: '<p>Body</p>' });
-    await emails.update(2, { subject: 'Updated' });
-    await emails.send(2, { testOnly: true });
-    await emails.getStats(2);
-    await emails.getRecipients(2, { top: 10, skip: 1 });
-    await emails.getAll({ status: 'Draft' }, 100);
+    const email = createTargetedEmails(client);
+    await email.list({ top: 10, skip: 1 });
+    await email.get('msg-foreign-id-123');
 
     const exportJobs = createExportJobs(client);
     await exportJobs.list({ top: 10, skip: 1, status: 'Completed' });
@@ -209,19 +196,17 @@ describe('command modules broad coverage', () => {
 
     const canvass = createCanvassResponses(client);
     await canvass.list({ top: 10, skip: 1, vanId: 100 });
-    await canvass.get(4);
-    await canvass.create({ vanId: 100, resultCodeId: 1, contactTypeId: 2 });
-    await canvass.getByPerson(100, { top: 10, skip: 1 });
-    await canvass.getAll({ vanId: 100 }, 1000);
+    await canvass.create({ vanId: 100, resultCodeId: 1, canvassContext: { contactTypeId: 2 } });
+    await canvass.inputTypes();
+    await canvass.resultCodes();
+    await canvass.contactTypes();
 
     const locations = createLocations(client);
     await locations.list({ top: 10, skip: 1, locationType: 'Office', state: 'VA' });
     await locations.get(12);
-    await locations.find({ name: 'HQ', city: 'Falls Church', state: 'VA', zip: '22043', top: 10, skip: 1 });
+    await locations.findOrCreate({ name: 'HQ', city: 'Falls Church', stateOrProvince: 'VA', zipOrPostalCode: '22043' });
     await locations.create({ name: 'HQ', city: 'Falls Church' });
-    await locations.update(12, { name: 'HQ 2' });
-    await locations.getEvents(12, { top: 5, skip: 1 });
-    await locations.getAll({ state: 'VA' }, 1000);
+    await locations.delete(12);
 
     const scores = createScores(client);
     await scores.list({ top: 10, skip: 1 });
@@ -247,15 +232,15 @@ describe('command modules broad coverage', () => {
   });
 
   test('validation branches for required fields', async () => {
-    await expect(createEvents(client).create({ name: 'OnlyName' })).rejects.toThrow(/startDate|endDate/);
+    await expect(createEvents(client).create({ eventTypeId: 1, name: 'OnlyName', endDate: '2026-01-01', locationId: 1, roleId: 1, shiftStartTime: 'a', shiftEndTime: 'b' })).rejects.toThrow(/startDate/);
     await expect(createContributions(client).create({ vanId: 1, amount: 5 })).rejects.toThrow(/dateReceived/);
-    await expect(createSavedLists(client).create({})).rejects.toThrow(/name/);
     await expect(createNotes(client).create({ vanId: 1 })).rejects.toThrow(/text/);
     await expect(createSignups(client).create({ eventId: 1 })).rejects.toThrow(/vanId/);
     await expect(createStories(client).create({ vanId: 1 })).rejects.toThrow(/title|text/);
-    await expect(createEmails(client).create({ name: 'n' })).rejects.toThrow(/subject|body/);
     await expect(createBulkImport(client).createJob({ importType: 'People' })).rejects.toThrow(/name/);
-    await expect(createCanvassResponses(client).create({ vanId: 1 })).rejects.toThrow(/resultCodeId/);
+    await expect(createCanvassResponses(client).create({})).rejects.toThrow(/vanId/);
+    await expect(createLocations(client).create({})).rejects.toThrow(/name/);
+    await expect(createLocations(client).findOrCreate({})).rejects.toThrow(/name/);
     await expect(createTargets(client).create({ targetType: 'Voter' })).rejects.toThrow(/name/);
     await expect(createSupporterGroups(client).create({})).rejects.toThrow(/name/);
   });

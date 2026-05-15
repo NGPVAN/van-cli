@@ -98,7 +98,7 @@ const create = function(client: VanApiClientLike) {
         await client.delete(`/signups/${signupId}`);
         return `Signup ${signupId} deleted`;
       } catch (error) {
-        throw new Error(`Failed to delete signupId ${signupId}`);
+        throw new Error(`Failed to delete signupId ${signupId}`, { cause: error });
       }
     },
   };

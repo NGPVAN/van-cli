@@ -13,7 +13,7 @@ describe('SDK exports', () => {
   it('configure returns a usable instance', () => {
     const api = configure({ apiKey: 'abc|1', appName: 'test' });
     expect(api).toBeInstanceOf(VanApi);
-    expect(typeof api.people.find).toBe('function');
+    expect(typeof api.people.list).toBe('function');
     expect(typeof api.savedLists.list).toBe('function');
   });
 

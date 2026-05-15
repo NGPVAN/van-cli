@@ -149,7 +149,7 @@ const create = function(client: VanApiClientLike) {
         await client.delete(`/people/${vanId}`);
         return `Person with VanID ${vanId} deleted`;
       } catch (error) {
-        throw new Error(`Failed to delete person with VanID ${vanId}`);
+        throw new Error(`Failed to delete person with VanID ${vanId}`, { cause: error });
       }
     },
     

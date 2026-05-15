@@ -12,7 +12,7 @@ import createChangedEntityExportJobs from './commands/changedEntityExportJobs';
 import createContributions from './commands/contributions';
 import createCustomFields from './commands/customFields';
 import createDesignations from './commands/designations';
-import createEmail from './commands/email';
+import createTargetedEmails from './commands/targetedEmails';
 import createEvents from './commands/events';
 import createEventTypes from './commands/eventTypes';
 import createExportJobs from './commands/exportJobs';
@@ -779,31 +779,31 @@ peopleCmd
 
 // --- Email ---
 
-const emailCmd = program
-  .command('email')
-  .description('Manage batch email');
+const targetedEmailsCmd = program
+  .command('targeted-emails')
+  .description('Manage targeted emails');
 
-emailCmd
+targetedEmailsCmd
   .command('list')
   .description('List batch emails')
   .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createEmail(getClient());
+      const api = createTargetedEmails(getClient());
       outputResult(await api.list(options), program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-emailCmd
+targetedEmailsCmd
   .command('get <emailId>')
   .description('Get an email by foreignMessageId')
   .action(async (foreignMessageId) => {
     try {
       validateNonemptyString(foreignMessageId, 'foreignMessageId');
-      const api = createEmail(getClient());
+      const api = createTargetedEmails(getClient());
       outputResult(await api.get(foreignMessageId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1472,22 +1472,6 @@ signupsCmd
   });
 
 signupsCmd
-  .command('update <signupId>')
-  .description('Update a signup by ID')
-  .requiredOption('-d, --data <json>', 'JSON payload for signup update')
-  .action(async (signupId, options) => {
-    try {
-      validatePositiveInt(signupId, 'signupId');
-      const payload = parseJsonPayload(options);
-      const api = createSignups(getClient());
-      const result = await api.update(signupId, payload);
-      outputResult(result, program.opts());
-    } catch (error) {
-      handleError(error);
-    }
-  });
-
-signupsCmd
   .command('delete <signupId>')
   .description('Delete a signup by ID')
   .action(async (signupId) => {
@@ -1609,7 +1593,7 @@ locationsCmd
   .action(async (options) => {
     try {
       const api = createLocations(getClient());
-      outputResult(await api.create(options));
+      outputResult(await api.create(options), program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -1629,7 +1613,7 @@ locationsCmd
   .action(async (options) => {
     try {
       const api = createLocations(getClient());
-      outputResult(await api.findOrCreate(options));
+      outputResult(await api.findOrCreate(options), program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -1772,6 +1756,19 @@ supporterGroupsCmd
       handleError(error);
     }
   });
+  
+supporterGroupsCmd
+  .command('get <supporterGroupId>')
+  .description('Get a Supporter Group by ID')
+  .action(async (supporterGroupId) => {
+    try {
+      validatePositiveInt(supporterGroupId, 'supporterGroupId');
+      const api = createSupporterGroups(getClient());
+      outputResult(await api.get(supporterGroupId), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
 
 supporterGroupsCmd
   .command('create')
@@ -1797,15 +1794,13 @@ supporterGroupsCmd
   });
 
 supporterGroupsCmd
-  .command('update <groupId>')
-  .description('Update a supporter group by ID')
-  .requiredOption('-d, --data <json>', 'JSON payload for supporter group update')
-  .action(async (groupId, options) => {
+  .command('delete <supporterGroupId>')
+  .description('Delete a supporter group by ID')
+  .action(async (supporterGroupId) => {
     try {
-      validatePositiveInt(groupId, 'groupId');
-      const payload = parseJsonPayload(options);
+      validatePositiveInt(supporterGroupId, 'supporterGroupId');
       const api = createSupporterGroups(getClient());
-      const result = await api.update(groupId, payload);
+      const result = await api.delete(supporterGroupId);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -1813,13 +1808,30 @@ supporterGroupsCmd
   });
 
 supporterGroupsCmd
-  .command('delete <groupId>')
-  .description('Delete a supporter group by ID')
-  .action(async (groupId) => {
+  .command('add-person <supporterGroupId> <vanId>')
+  .description('Add a person to a supporter group')
+  .action(async (supporterGroupId, vanId) => {
     try {
-      validatePositiveInt(groupId, 'groupId');
+      validatePositiveInt(supporterGroupId, 'supporterGroupId');
+      validatePositiveInt(vanId, 'vanId');
       const api = createSupporterGroups(getClient());
-      const result = await api.delete(groupId);
+      const result = await api.addPerson(supporterGroupId, vanId);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+  
+supporterGroupsCmd
+  .command('remove-person <supporterGroupId> <vanId>')
+  .description('Remove a person from a supporter group')
+  .action(async (supporterGroupId, vanId) => {
+    try {
+      validatePositiveInt(supporterGroupId, 'supporterGroupId');
+      validatePositiveInt(vanId, 'vanId');
+      const api = createSupporterGroups(getClient());
+      const result = await api.removePerson(supporterGroupId, vanId);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -1828,8 +1840,12 @@ supporterGroupsCmd
 
 // --- API Key Profiles ---
 
-program
+const apiKeyProfilesCmd = program
   .command('api-key-profiles')
+  .description('Manage API key profiles');
+
+apiKeyProfilesCmd
+  .command('get')
   .description('Get API key profile details for the current API key')
   .action(async () => {
     try {

@@ -101,7 +101,7 @@ const create = function(client: VanApiClientLike) {
         await client.delete(`/events/${eventId}`);
         return `Event ${eventId} deleted`;
       } catch (error) {
-        throw new Error(`Failed to delete event ${eventId}`);
+        throw new Error(`Failed to delete event ${eventId}`, { cause: error });
       }
     },
   };
