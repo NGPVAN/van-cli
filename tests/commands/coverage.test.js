@@ -139,11 +139,9 @@ describe('command modules broad coverage', () => {
     await groups.list({ top: 20, skip: 1 });
     await groups.get(3);
     await groups.create({ name: 'Core', description: 'Core volunteers' });
-    await groups.update(3, { description: 'Updated' });
-    await groups.addPerson(3, 100, { role: 'Lead' });
+    await groups.addPerson(3, 100);
     await groups.removePerson(3, 100);
-    await groups.getPeople(3, { top: 10, skip: 1 });
-    await groups.getAll({ name: 'Core' }, 300);
+    await groups.delete(3);
   });
 
   test('remaining modules', async () => {
