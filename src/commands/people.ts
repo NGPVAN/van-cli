@@ -44,7 +44,7 @@ const create = function(client: VanApiClientLike) {
      * @param {string} criteria.$expand - Comma-separated fields to expand
      * @returns {Promise<Object>} Search results
      */
-    async find(criteria = {}) {
+    async list(criteria = {}) {
       const params = {
         $top: Math.min(criteria.top || 50, 50), // VAN limits people search to 50
         $skip: criteria.skip || 0
@@ -77,20 +77,14 @@ const create = function(client: VanApiClientLike) {
      * Fuzzy name search across people and organizations
      * @param {Object} criteria - Search criteria
      * @param {string} criteria.name - Name string to match
-     * @param {number} criteria.top - Number of results (max 50)
-     * @param {number} criteria.skip - Number of results to skip
-     * @param {string} criteria.$orderby - Sort expression (for example: Name)
      * @param {string} criteria.$expand - Comma-separated fields to expand
      * @returns {Promise<Object>} Search results
      */
     async quickSearch(criteria = {}) {
       const params = {
         name: criteria.name,
-        $top: Math.min(criteria.top || 50, 50),
-        $skip: criteria.skip || 0
       };
 
-      if (criteria.$orderby) params.$orderby = criteria.$orderby;
       if (criteria.$expand) params.$expand = criteria.$expand;
 
       return client.get('/people/quickSearch', params);
@@ -123,7 +117,14 @@ const create = function(client: VanApiClientLike) {
      * @returns {Promise<Object>} Created person object
      */
     async create(personData) {
-      return client.post('/people', personData);
+      const requiredFields = ['firstName', 'lastName'];
+      for (const field of requiredFields) {
+        if (!personData[field]) {
+          throw new Error(`Required field '${field}' is missing`);
+        }
+      }
+
+      return client.post('/people/create', personData);
     },
     
     /**
@@ -136,6 +137,20 @@ const create = function(client: VanApiClientLike) {
       // VAN API docs use POST /people/{vanId} for person updates.
       // PUT is not supported on this endpoint in VAN v4.
       return client.post(`/people/${vanId}`, personData);
+    },
+
+    /**
+     * Delete a person
+     * @param {number} vanId - The person's VAN ID
+     * @returns {Promise<Object>} Deletion result
+     */
+    async delete(vanId) {
+      try {
+        await client.delete(`/people/${vanId}`);
+        return `Person with VanID ${vanId} deleted`;
+      } catch (error) {
+        throw new Error(`Failed to delete person with VanID ${vanId}`, { cause: error });
+      }
     },
     
     /**

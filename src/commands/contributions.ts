@@ -14,22 +14,17 @@ const create = function(client: VanApiClientLike) {
      * @param {Object} options - Optional parameters
      * @param {number} options.top - Number of results
      * @param {number} options.skip - Number of results to skip
-     * @param {string} options.startDate - Start date filter (YYYY-MM-DD)
-     * @param {string} options.endDate - End date filter (YYYY-MM-DD)
-     * @param {number} options.vanId - Person VAN ID filter
+     * @param {number} vanId - Person VAN ID
      * @returns {Promise<Object>} List of contributions
      */
-    async list(options = {}) {
+    async list(vanId, options = {}) {
       const params = {
         $top: options.top || 50,
-        $skip: options.skip || 0
+        $skip: options.skip || 0,
+        vanId: vanId
       };
-      
-      if (options.startDate) params.startDate = options.startDate;
-      if (options.endDate) params.endDate = options.endDate;
-      if (options.vanId) params.vanId = options.vanId;
-      
-      return client.get('/contributions', params);
+
+      return client.get('/contributions/recentContributions', params);
     },
     
     /**
@@ -51,14 +46,27 @@ const create = function(client: VanApiClientLike) {
      * @returns {Promise<Object>} Created contribution object
      */
     async create(contributionData) {
-      const requiredFields = ['vanId', 'amount', 'dateReceived'];
+      const requiredFields = ['vanId', 'amount', 'dateReceived', 'designationId', 'status', 'paymentType'];
       for (const field of requiredFields) {
-        if (!contributionData[field]) {
+        if (contributionData[field] === undefined) {
           throw new Error(`Required field '${field}' is missing`);
         }
       }
-      
-      return client.post('/contributions', contributionData);
+
+      const body = {
+        contact: {
+          vanId: contributionData.vanId
+        },
+        designation: {
+          designationId: contributionData.designationId
+        },
+        dateReceived: contributionData.dateReceived,
+        amount: contributionData.amount,
+        status: contributionData.status,
+        paymentType: contributionData.paymentType
+      };
+
+      return client.post('/contributions', body);
     },
     
     /**
@@ -68,35 +76,23 @@ const create = function(client: VanApiClientLike) {
      * @returns {Promise<Object>} Updated contribution object
      */
     async update(contributionId, contributionData) {
-      return client.put(`/contributions/${contributionId}`, contributionData);
-    },
-    
-    /**
-     * Get contributions for a specific person
-     * @param {number} vanId - Person's VAN ID
-     * @param {Object} options - Optional parameters
-     * @param {number} options.top - Number of results
-     * @param {number} options.skip - Number of results to skip
-     * @returns {Promise<Object>} List of contributions for the person
-     */
-    async getByPerson(vanId, options = {}) {
-      const params = {
-        $top: options.top || 50,
-        $skip: options.skip || 0
-      };
+      const existing = await client.get(`/contributions/${contributionId}`);
+
+      // Remove server-managed/read-only fields
+      for (const readOnlyProperty of [ 'processedAmount', 'processedCurrency', ]) {
+        delete existing[readOnlyProperty];
+      }
       
-      return client.get(`/people/${vanId}/contributions`, params);
+      if (contributionData.vanId !== undefined) existing.contact = { vanId: contributionData.vanId };
+      if (contributionData.designationId !== undefined) existing.designation = { designationId: contributionData.designationId };
+      if (contributionData.amount !== undefined) existing.amount = contributionData.amount;
+      if (contributionData.dateReceived !== undefined) existing.dateReceived = contributionData.dateReceived;
+      if (contributionData.status !== undefined) existing.status = contributionData.status;
+      if (contributionData.paymentType !== undefined) existing.paymentType = contributionData.paymentType;
+
+      const response = await client.put(`/contributions/${contributionId}`, existing);
+      return (response !== null) ? response : this.get(contributionId);
     },
-    
-    /**
-     * Get all contributions (automatically paginated)
-     * @param {Object} criteria - Filter criteria
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all contributions
-     */
-    async getAll(criteria = {}, maxResults = 10000) {
-      return client.getAllPaginated('/contributions', criteria, maxResults);
-    }
   };
 };
 

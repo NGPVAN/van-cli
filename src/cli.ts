@@ -4,6 +4,26 @@ import VanApiClient from './client';
 import { version } from '../package.json';
 import { VanApiError } from './errors';
 import { getProfile, checkConfigPermissions } from './config';
+import createActivistCodes from './commands/activistCodes';
+import createApiKeyProfiles from './commands/apiKeyProfiles';
+import createBulkImport from './commands/bulkImport';
+import createCanvassResponses from './commands/canvassResponses';
+import createChangedEntityExportJobs from './commands/changedEntityExportJobs';
+import createContributions from './commands/contributions';
+import createCustomFields from './commands/customFields';
+import createDesignations from './commands/designations';
+import createTargetedEmails from './commands/targetedEmails';
+import createEvents from './commands/events';
+import createEventTypes from './commands/eventTypes';
+import createExportJobs from './commands/exportJobs';
+import createLocations from './commands/locations';
+import createNotes from './commands/notes';
+import createPeople from './commands/people';
+import createSavedLists from './commands/savedLists';
+import createScores from './commands/scores';
+import createSignups from './commands/signups';
+import createSupporterGroups from './commands/supporterGroups';
+import createSurveyQuestions from './commands/surveyQuestions';
 
 const isCompletionMode = process.argv.includes('completion') || process.argv.includes('__complete');
 const isSchemaMode = process.argv.includes('schema');
@@ -66,9 +86,8 @@ function getClient() {
   return client;
 }
 
-// Known people expand values for /people/{vanId}.
-// Source: VAN API validation hint for invalid $expand and docs.ngpvan.com people docs.
-const PEOPLE_GET_KNOWN_EXPANDS = [
+// Valid $expand values for GET /people/{vanId} endpoint.
+const PEOPLE_GET_EXPANDS = [
   'contributionHistory',
   'addresses',
   'phones',
@@ -93,13 +112,45 @@ const PEOPLE_GET_KNOWN_EXPANDS = [
   'pollingLocation'
 ];
 
-// Valid $expand values for GET /people search endpoint.
-const PEOPLE_SEARCH_EXPANDS = [
+// Valid $expand values for GET /people endpoint.
+const PEOPLE_LIST_EXPANDS = [
   'Addresses',
   'Emails',
   'Phones',
   'Districts',
   'PollingLocation'
+];
+
+// Valid $expand values for GET /events/{eventId} endpoint.
+const EVENTS_GET_EXPANDS = [
+  'locations',
+  'codes',
+  'shifts',
+  'roles',
+  'notes',
+  'financialProgram',
+  'ticketCategories',
+  'voterRegistrationBatches'
+];
+
+// Valid $expand values for GET /events endpoint.
+const EVENTS_LIST_EXPANDS = [
+  'locations',
+  'codes',
+  'shifts',
+  'roles',
+  'notes',
+  'financialProgram',
+  'ticketCategories',
+  'onlineForms'
+];
+
+// Valid $expand values for GET /designations/{designationId} endpoint.
+const DESIGNATIONS_GET_EXPANDS = [
+  'paymentTypes',
+  'attributionTypes',
+  'bankAccounts',
+  'disclosureFields'
 ];
 
 // --- Utility functions ---
@@ -142,6 +193,7 @@ function outputResult(data: unknown, options: Record<string, unknown> = {}) {
 }
 
 // Error handler
+
 function handleError(error: unknown) {
   if (error instanceof VanApiError) {
     console.error(chalk.red(`VAN API Error (${error.status}): ${error.message}`));
@@ -201,6 +253,14 @@ function validatePositiveInt(value: string, label: string): number {
     process.exit(1);
   }
   return num;
+}
+
+function validateNonemptyString(value: string, label: string): string {
+  if ((value || "").length < 1) {
+    console.error(chalk.red(`Error: ${label} must be a valid string: "${value}"`));
+    process.exit(1);
+  }
+  return value;
 }
 
 function validateDate(value: string, label: string): string {
@@ -506,32 +566,11 @@ const schemaCmd = program
     outputResult(actions[actionKey], program.opts());
   });
 
-// --- People commands ---
+// --- People ---
 
 const peopleCmd = program
   .command('people')
   .description('Manage people');
-
-peopleCmd
-  .command('expand-fields')
-  .description('List known $expand fields for people endpoints')
-  .action(() => {
-    outputResult({
-      resource: 'people',
-      endpointExpandFields: {
-        '/people': PEOPLE_SEARCH_EXPANDS,
-        '/people/{vanId}': PEOPLE_GET_KNOWN_EXPANDS
-      },
-      notes: [
-        'Some expansions are endpoint and permission dependent.',
-        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
-      ],
-      sources: [
-        'https://docs.ngpvan.com/reference/peoplevanid-1',
-        'VAN API INVALID_PARAMETER hint for $expand on /people/{vanId}'
-      ]
-    }, program.opts());
-  });
 
 peopleCmd
   .command('get <vanId>')
@@ -540,11 +579,8 @@ peopleCmd
   .action(async (vanId, options) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const params: Record<string, unknown> = {};
-      if (options.expand) {
-        params.$expand = options.expand;
-      }
-      const person = await getClient().get(`/people/${vanId}`, params);
+      const api = createPeople(getClient());
+      const person = await api.get(vanId, options.expand ? { $expand: options.expand } : {});
       outputResult(person, program.opts());
     } catch (error) {
       handleError(error);
@@ -561,7 +597,8 @@ peopleCmd
       const payload = parseJsonPayload(options);
       const globalOpts = program.opts();
       const merged = globalOpts.json ? { ...parseGlobalJsonPayload(globalOpts), ...payload } : payload;
-      const result = await getClient().post(`/people/${vanId}`, merged);
+      const api = createPeople(getClient());
+      const result = await api.update(vanId, merged);
       outputResult(result, globalOpts);
     } catch (error) {
       handleError(error);
@@ -574,7 +611,8 @@ peopleCmd
   .action(async (vanId) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const result = await getClient().delete(`/people/${vanId}`);
+      const api = createPeople(getClient());
+      const result = await api.delete(vanId);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -582,8 +620,8 @@ peopleCmd
   });
 
 peopleCmd
-  .command('find')
-  .description('Find people by criteria')
+  .command('list')
+  .description('List people by criteria')
   .option('-f, --firstName <name>', 'First name')
   .option('-l, --lastName <name>', 'Last name')
   .option('--middleName <name>', 'Middle name')
@@ -609,31 +647,32 @@ peopleCmd
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
 
-      const params: Record<string, unknown> = {
-        $top: merged.top,
-        $skip: merged.skip
+      const criteria: Record<string, unknown> = {
+        top: merged.top,
+        skip: merged.skip
       };
 
-      if (merged.firstName) params.firstName = merged.firstName;
-      if (merged.lastName) params.lastName = merged.lastName;
-      if (merged.middleName) params.middleName = merged.middleName;
-      if (merged.streetAddress) params.streetAddress = merged.streetAddress;
-      if (merged.city) params.city = merged.city;
-      if (merged.stateOrProvince) params.stateOrProvince = merged.stateOrProvince;
-      if (merged.zipOrPostalCode) params.zipOrPostalCode = merged.zipOrPostalCode;
-      if (merged.phoneNumber) params.phoneNumber = merged.phoneNumber;
-      if (merged.phone) params.phoneNumber = merged.phone;
-      if (merged.email) params.email = merged.email;
-      if (merged.dateOfBirth) params.dateOfBirth = validateDate(merged.dateOfBirth as string, 'dateOfBirth');
-      if (merged.employer) params.employer = merged.employer;
-      if (merged.occupation) params.occupation = merged.occupation;
-      if (merged.commonName) params.commonName = merged.commonName;
-      if (merged.officialName) params.officialName = merged.officialName;
-      if (merged.contactMode) params.contactMode = merged.contactMode;
-      if (merged.orderby) params.$orderby = merged.orderby;
-      if (merged.expand) params.$expand = merged.expand;
+      if (merged.firstName) criteria.firstName = merged.firstName;
+      if (merged.lastName) criteria.lastName = merged.lastName;
+      if (merged.middleName) criteria.middleName = merged.middleName;
+      if (merged.streetAddress) criteria.streetAddress = merged.streetAddress;
+      if (merged.city) criteria.city = merged.city;
+      if (merged.stateOrProvince) criteria.stateOrProvince = merged.stateOrProvince;
+      if (merged.zipOrPostalCode) criteria.zipOrPostalCode = merged.zipOrPostalCode;
+      if (merged.phoneNumber) criteria.phoneNumber = merged.phoneNumber;
+      if (merged.phone) criteria.phone = merged.phone;
+      if (merged.email) criteria.email = merged.email;
+      if (merged.dateOfBirth) criteria.dateOfBirth = validateDate(merged.dateOfBirth as string, 'dateOfBirth');
+      if (merged.employer) criteria.employer = merged.employer;
+      if (merged.occupation) criteria.occupation = merged.occupation;
+      if (merged.commonName) criteria.commonName = merged.commonName;
+      if (merged.officialName) criteria.officialName = merged.officialName;
+      if (merged.contactMode) criteria.contactMode = merged.contactMode;
+      if (merged.orderby) criteria.$orderby = merged.orderby;
+      if (merged.expand) criteria.$expand = merged.expand;
 
-      const results = await getClient().get('/people', params);
+      const api = createPeople(getClient());
+      const results = await api.list(criteria);
       outputResult(results, globalOpts);
     } catch (error) {
       handleError(error);
@@ -644,22 +683,17 @@ peopleCmd
   .command('quick-search')
   .description('Fuzzy search people/orgs by a single name string')
   .requiredOption('-n, --name <name>', 'Name query (example: John Smith)')
-  .option('--top <count>', 'Number of results (max 50)', val => parseInt(val, 10), 50)
-  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .option('--orderby <expr>', 'OData $orderby expression (example: Name)')
   .option('--expand <fields>', 'Expand related fields (comma-separated). See: van people expand-fields')
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
+      const criteria: Record<string, unknown> = {
         name: options.name,
-        $top: options.top,
-        $skip: options.skip
       };
 
-      if (options.orderby) params.$orderby = options.orderby;
-      if (options.expand) params.$expand = options.expand;
+      if (options.expand) criteria.$expand = options.expand;
 
-      const results = await getClient().get('/people/quickSearch', params);
+      const api = createPeople(getClient());
+      const results = await api.quickSearch(criteria);
       outputResult(results, program.opts());
     } catch (error) {
       handleError(error);
@@ -686,37 +720,134 @@ peopleCmd
       if (merged.email) data.email = merged.email;
       if (merged.phone) data.phone = merged.phone;
 
-      const result = await getClient().post('/people/findOrCreate', data);
+      const api = createPeople(getClient());
+      const result = await api.findOrCreate(data);
       outputResult(result, globalOpts);
     } catch (error) {
       handleError(error);
     }
   });
 
-// Activist Codes commands
+peopleCmd
+  .command('create')
+  .description('Create a new person')
+  .requiredOption('-f, --firstName <name>', 'First name')
+  .requiredOption('-l, --lastName <name>', 'Last name')
+  .option('-e, --email <email>', 'Email address')
+  .option('-p, --phone <phone>', 'Phone number')
+  .action(async (options) => {
+    try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+
+      const data: Record<string, unknown> = {
+        firstName: merged.firstName,
+        lastName: merged.lastName
+      };
+
+      if (merged.email) data.email = merged.email;
+      if (merged.phone) data.phone = merged.phone;
+
+      const api = createPeople(getClient());
+      const result = await api.create(data);
+      outputResult(result, globalOpts);
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+peopleCmd
+  .command('expand-fields')
+  .description('List $expand fields for people endpoints')
+  .action(() => {
+    outputResult({
+      resource: 'people',
+      endpointExpandFields: {
+        '/people': PEOPLE_LIST_EXPANDS,
+        '/people/{vanId}': PEOPLE_GET_EXPANDS
+      },
+      notes: [
+        'Some expansions are endpoint and permission dependent.',
+        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
+      ],
+      sources: [
+        'https://docs.ngpvan.com/reference/peoplevanid-1',
+        'VAN API INVALID_PARAMETER hint for $expand on /people/{vanId}'
+      ]
+    }, program.opts());
+  });
+
+// --- Email ---
+
+const targetedEmailsCmd = program
+  .command('targeted-emails')
+  .description('Manage targeted emails');
+
+targetedEmailsCmd
+  .command('list')
+  .description('List batch emails')
+  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
+  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .action(async (options) => {
+    try {
+      const api = createTargetedEmails(getClient());
+      outputResult(await api.list(options), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+targetedEmailsCmd
+  .command('get <emailId>')
+  .description('Get an email by foreignMessageId')
+  .action(async (foreignMessageId) => {
+    try {
+      validateNonemptyString(foreignMessageId, 'foreignMessageId');
+      const api = createTargetedEmails(getClient());
+      outputResult(await api.get(foreignMessageId), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- Activist Codes ---
+
 const activistCodesCmd = program
   .command('activist-codes')
   .description('Manage activist codes');
 
 activistCodesCmd
   .command('list')
-  .description('List all activist codes')
+  .description('List all activist codes, or activist codes applied to a person if --vanId is given')
+  .option('-v, --vanId <id>', 'Person VAN ID (returns codes applied to that person)', parseInt)
   .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-      const codes = await getClient().get('/activistCodes', params);
+      const api = createActivistCodes(getClient());
+      const codes = await api.list(options);
       outputResult(codes, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Survey Questions commands
+activistCodesCmd
+  .command('get <activistCodeId>')
+  .description('Get an activist code by ID')
+  .action(async (activistCodeId) => {
+    try {
+      validatePositiveInt(activistCodeId, 'activistCodeId');
+      const api = createActivistCodes(getClient());
+      const code = await api.get(activistCodeId);
+      outputResult(code, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- Survey Questions ---
+
 const surveyQuestionsCmd = program
   .command('survey-questions')
   .description('Manage survey questions');
@@ -728,18 +859,30 @@ surveyQuestionsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-      const questions = await getClient().get('/surveyQuestions', params);
+      const api = createSurveyQuestions(getClient());
+      const questions = await api.list(options);
       outputResult(questions, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Events commands
+surveyQuestionsCmd
+  .command('get <surveyQuestionId>')
+  .description('Get a survey question by ID')
+  .action(async (surveyQuestionId) => {
+    try {
+      validatePositiveInt(surveyQuestionId, 'surveyQuestionId');
+      const api = createSurveyQuestions(getClient());
+      const question = await api.get(surveyQuestionId);
+      outputResult(question, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- Events ---
+
 const eventsCmd = program
   .command('events')
   .description('Manage events');
@@ -749,19 +892,21 @@ eventsCmd
   .description('List events')
   .option('--startDate <date>', 'Start date filter (YYYY-MM-DD)')
   .option('--endDate <date>', 'End date filter (YYYY-MM-DD)')
+  .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van events expand-fields')
   .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
+      const listOptions: Record<string, unknown> = {
+        top: options.top,
+        skip: options.skip
       };
 
-      if (options.startDate) params.startDate = validateDate(options.startDate, 'startDate');
-      if (options.endDate) params.endDate = validateDate(options.endDate, 'endDate');
+      if (options.startDate) listOptions.startDate = validateDate(options.startDate, 'startDate');
+      if (options.endDate) listOptions.endDate = validateDate(options.endDate, 'endDate');
 
-      const events = await getClient().get('/events', params);
+      const api = createEvents(getClient());
+      const events = await api.list(listOptions);
       outputResult(events, program.opts());
     } catch (error) {
       handleError(error);
@@ -769,15 +914,85 @@ eventsCmd
   });
 
 eventsCmd
-  .command('update <eventId>')
-  .description('Update an event by ID')
-  .requiredOption('-d, --data <json>', 'JSON payload for event update')
+  .command('get <eventId>')
+  .description('Get an event by ID')
+  .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van events expand-fields')
   .action(async (eventId, options) => {
     try {
       validatePositiveInt(eventId, 'eventId');
-      const payload = parseJsonPayload(options);
-      const result = await getClient().put(`/events/${eventId}`, payload);
-      outputResult(result, program.opts());
+      const api = createEvents(getClient());
+      const event = await api.get(eventId, options.expand ? { $expand: options.expand } : {});
+      outputResult(event, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+eventsCmd
+  .command('create')
+  .description('Create a new event')
+  .requiredOption('--eventTypeId <id>', 'Event type ID', parseInt)
+  .requiredOption('-n, --name <name>', 'Event name')
+  .option('--shortName <name>', 'Short name (defaults to name if omitted)')
+  .requiredOption('--startDate <datetime>', 'Start date/time (ISO 8601, e.g. 2026-05-10T10:00:00Z)')
+  .requiredOption('--endDate <datetime>', 'End date/time (ISO 8601, e.g. 2026-05-10T12:00:00Z)')
+  .requiredOption('--locationId <id>', 'Location ID', parseInt)
+  .requiredOption('--roleId <id>', 'Role ID', parseInt)
+  .requiredOption('--shiftStartTime <datetime>', 'Shift start time (ISO 8601)')
+  .requiredOption('--shiftEndTime <datetime>', 'Shift end time (ISO 8601)')
+  .action(async (options) => {
+    try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+      const data: Record<string, unknown> = {
+        eventTypeId: merged.eventTypeId,
+        name: merged.name,
+        startDate: merged.startDate,
+        endDate: merged.endDate,
+        locationId: merged.locationId,
+        roleId: merged.roleId,
+        shiftStartTime: merged.shiftStartTime,
+        shiftEndTime: merged.shiftEndTime,
+      };
+      if (merged.shortName) data.shortName = merged.shortName;
+      const api = createEvents(getClient());
+      const event = await api.create(data);
+      outputResult(event, globalOpts);
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+eventsCmd
+  .command('update <eventId>')
+  .description('Update an event by ID (fetches existing event then applies specified changes)')
+  .option('--eventTypeId <id>', 'Event type ID', parseInt)
+  .option('-n, --name <name>', 'Event name')
+  .option('--shortName <name>', 'Short name')
+  .option('--startDate <datetime>', 'Start date/time (ISO 8601, e.g. 2026-05-10T10:00:00Z)')
+  .option('--endDate <datetime>', 'End date/time (ISO 8601, e.g. 2026-05-10T12:00:00Z)')
+  .option('--locationId <id>', 'Location ID', parseInt)
+  .option('--roleId <id>', 'Role ID', parseInt)
+  .option('--shiftStartTime <datetime>', 'Shift start time (ISO 8601)')
+  .option('--shiftEndTime <datetime>', 'Shift end time (ISO 8601)')
+  .action(async (eventId, options) => {
+    try {
+      validatePositiveInt(eventId, 'eventId');
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+      const data: Record<string, unknown> = {};
+      if (merged.eventTypeId !== undefined) data.eventTypeId = merged.eventTypeId;
+      if (merged.name !== undefined) data.name = merged.name;
+      if (merged.shortName !== undefined) data.shortName = merged.shortName;
+      if (merged.startDate !== undefined) data.startDate = merged.startDate;
+      if (merged.endDate !== undefined) data.endDate = merged.endDate;
+      if (merged.locationId !== undefined) data.locationId = merged.locationId;
+      if (merged.roleId !== undefined) data.roleId = merged.roleId;
+      if (merged.shiftStartTime !== undefined) data.shiftStartTime = merged.shiftStartTime;
+      if (merged.shiftEndTime !== undefined) data.shiftEndTime = merged.shiftEndTime;
+      const api = createEvents(getClient());
+      const result = await api.update(eventId, data);
+      outputResult(result, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -789,14 +1004,37 @@ eventsCmd
   .action(async (eventId) => {
     try {
       validatePositiveInt(eventId, 'eventId');
-      const result = await getClient().delete(`/events/${eventId}`);
+      const api = createEvents(getClient());
+      const result = await api.delete(eventId);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Saved Lists commands
+eventsCmd
+  .command('expand-fields')
+  .description('List $expand fields for events endpoints')
+  .action(() => {
+    outputResult({
+      resource: 'events',
+      endpointExpandFields: {
+        '/events': EVENTS_LIST_EXPANDS,
+        '/events/{eventId}': EVENTS_GET_EXPANDS
+      },
+      notes: [
+        'Some expansions are endpoint and permission dependent.',
+        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
+      ],
+      sources: [
+        'https://docs.ngpvan.com/reference/events-overview',
+        'VAN API INVALID_PARAMETER hint for $expand on /events/{eventId}'
+      ]
+    }, program.opts());
+  });
+
+// --- Saved Lists ---
+
 const savedListsCmd = program
   .command('saved-lists')
   .description('Manage saved lists');
@@ -808,11 +1046,8 @@ savedListsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: Math.min(options.top, 100), // VAN limits saved lists to 100
-        $skip: options.skip
-      };
-      const lists = await getClient().get('/savedLists', params);
+      const api = createSavedLists(getClient());
+      const lists = await api.list(options);
       outputResult(lists, program.opts());
     } catch (error) {
       handleError(error);
@@ -820,34 +1055,22 @@ savedListsCmd
   });
 
 savedListsCmd
-  .command('update <savedListId>')
-  .description('Update a saved list by ID')
-  .requiredOption('-d, --data <json>', 'JSON payload for saved list update')
+  .command('get <savedListId>')
+  .description('Get a saved list by ID')
+  .option('-e, --expand <fields>', 'Expand related fields (comma-separated)')
   .action(async (savedListId, options) => {
     try {
       validatePositiveInt(savedListId, 'savedListId');
-      const payload = parseJsonPayload(options);
-      const result = await getClient().put(`/savedLists/${savedListId}`, payload);
-      outputResult(result, program.opts());
+      const api = createSavedLists(getClient());
+      const list = await api.get(savedListId, options.expand ? { $expand: options.expand } : {});
+      outputResult(list, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-savedListsCmd
-  .command('delete <savedListId>')
-  .description('Delete a saved list by ID')
-  .action(async (savedListId) => {
-    try {
-      validatePositiveInt(savedListId, 'savedListId');
-      const result = await getClient().delete(`/savedLists/${savedListId}`);
-      outputResult(result, program.opts());
-    } catch (error) {
-      handleError(error);
-    }
-  });
+// --- Export Jobs ---
 
-// Export Jobs commands
 const exportJobsCmd = program
   .command('export-jobs')
   .description('Manage export jobs');
@@ -868,43 +1091,97 @@ exportJobsCmd
         webhookUrl: validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl'),
       };
 
-      const job = await getClient().post('/exportJobs', data);
+      const api = createExportJobs(getClient());
+      const job = await api.create(data);
       outputResult(job, globalOpts);
     } catch (error) {
       handleError(error);
     }
   });
 
-// Canvass Responses commands
+// --- Canvass Responses ---
+
 const canvassResponsesCmd = program
   .command('canvass-responses')
   .description('Manage canvass responses');
 
 canvassResponsesCmd
   .command('create')
-  .description('Create a canvass response')
+  .description('Create a canvass response for a person')
   .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
-  .requiredOption('-r, --resultCodeId <id>', 'Result code ID', parseInt)
-  .option('-c, --canvassContext <context>', 'Canvass context')
+  .option('-r, --resultCodeId <id>', 'Result code ID', parseInt)
+  .option('-c, --canvassContext <json>', 'Canvass context (JSON)')
   .action(async (options) => {
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data: Record<string, unknown> = {
+      const api = createCanvassResponses(getClient());
+      const response = await api.create({
         vanId: merged.vanId,
-        resultCodeId: merged.resultCodeId
-      };
-
-      if (merged.canvassContext) data.canvassContext = merged.canvassContext;
-
-      const response = await getClient().post('/canvassResponses', data);
+        resultCodeId: merged.resultCodeId,
+        canvassContext: merged.canvassContext ? JSON.parse(merged.canvassContext as string) : undefined,
+      });
       outputResult(response, globalOpts);
     } catch (error) {
       handleError(error);
     }
   });
 
-// Notes commands
+canvassResponsesCmd
+  .command('list')
+  .description('List canvass responses for a person')
+  .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
+  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
+  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .action(async (options) => {
+    try {
+      validatePositiveInt(options.vanId, 'vanId');
+      const api = createCanvassResponses(getClient());
+      const results = await api.list(options);
+      outputResult(results, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+canvassResponsesCmd
+  .command('input-types')
+  .description('List valid canvass response input types')
+  .action(async () => {
+    try {
+      const api = createCanvassResponses(getClient());
+      outputResult(await api.inputTypes(), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+canvassResponsesCmd
+  .command('result-codes')
+  .description('List valid canvass response result codes')
+  .action(async () => {
+    try {
+      const api = createCanvassResponses(getClient());
+      outputResult(await api.resultCodes(), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+canvassResponsesCmd
+  .command('contact-types')
+  .description('List valid canvass response contact types')
+  .action(async () => {
+    try {
+      const api = createCanvassResponses(getClient());
+      outputResult(await api.contactTypes(), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- Notes ---
+
 const notesCmd = program
   .command('notes')
   .description('Manage notes');
@@ -926,7 +1203,8 @@ notesCmd
 
       if (merged.category) data.category = merged.category;
 
-      const note = await getClient().post('/notes', data);
+      const api = createNotes(getClient());
+      const note = await api.create(data);
       outputResult(note, globalOpts);
     } catch (error) {
       handleError(error);
@@ -941,7 +1219,8 @@ notesCmd
     try {
       validatePositiveInt(noteId, 'noteId');
       const payload = parseJsonPayload(options);
-      const result = await getClient().put(`/notes/${noteId}`, payload);
+      const api = createNotes(getClient());
+      const result = await api.update(noteId, payload);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -954,39 +1233,30 @@ notesCmd
   .action(async (noteId) => {
     try {
       validatePositiveInt(noteId, 'noteId');
-      const result = await getClient().delete(`/notes/${noteId}`);
+      const api = createNotes(getClient());
+      const result = await api.delete(noteId);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Contributions commands
+// --- Contributions ---
+
 const contributionsCmd = program
   .command('contributions')
   .description('Manage contributions');
 
 contributionsCmd
-  .command('list')
-  .description('List contributions')
-  .option('--startDate <date>', 'Start date filter (YYYY-MM-DD)')
-  .option('--endDate <date>', 'End date filter (YYYY-MM-DD)')
-  .option('--vanId <id>', 'Person VAN ID filter', parseInt)
+  .command('list <vanId>')
+  .description('List contributions for a person')
   .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .action(async (options) => {
+  .action(async (vanId, options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-
-      if (options.startDate) params.startDate = validateDate(options.startDate, 'startDate');
-      if (options.endDate) params.endDate = validateDate(options.endDate, 'endDate');
-      if (options.vanId) params.vanId = options.vanId;
-
-      const contributions = await getClient().get('/contributions', params);
-      outputResult(contributions, program.opts());
+      validatePositiveInt(vanId, 'vanId');
+      const api = createContributions(getClient());
+      outputResult(await api.list(vanId, options), program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -995,40 +1265,153 @@ contributionsCmd
 contributionsCmd
   .command('get <contributionId>')
   .description('Get a contribution by ID')
-  .action(async (contributionId, options) => {
+  .action(async (contributionId) => {
     try {
       validatePositiveInt(contributionId, 'contributionId');
-      const contribution = await getClient().get(`/contributions/${contributionId}`);
-      outputResult(contribution, program.opts());
+      const api = createContributions(getClient());
+      outputResult(await api.get(contributionId), program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Signups commands
+contributionsCmd
+  .command('create')
+  .description('Create a contribution')
+  .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
+  .requiredOption('-a, --amount <amount>', 'Contribution amount', parseFloat)
+  .requiredOption('-d, --dateReceived <date>', 'Date received (YYYY-MM-DD)')
+  .requiredOption('--designationId <id>', 'Designation ID', parseInt)
+  .requiredOption('--status <status>', 'Contribution status')
+  .requiredOption('--paymentType <type>', 'Payment type')
+  .action(async (options) => {
+    try {
+      validateDate(options.dateReceived, 'dateReceived');
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+      const api = createContributions(getClient());
+      outputResult(await api.create(merged), globalOpts);
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+contributionsCmd
+  .command('update <contributionId>')
+  .description('Update a contribution by ID (fetches existing contribution then applies specified changes)')
+  .option('-v, --vanId <id>', 'Person VAN ID', parseInt)
+  .option('-a, --amount <amount>', 'Contribution amount', parseFloat)
+  .option('-d, --dateReceived <date>', 'Date received (YYYY-MM-DD)')
+  .option('--designationId <id>', 'Designation ID', parseInt)
+  .option('--status <status>', 'Contribution status')
+  .option('--paymentType <type>', 'Payment type')
+  .action(async (contributionId, options) => {
+    try {
+      validatePositiveInt(contributionId, 'contributionId');
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+      const data: Record<string, unknown> = {};
+      if (merged.vanId !== undefined) data.vanId = merged.vanId;
+      if (merged.amount !== undefined) data.amount = merged.amount;
+      if (merged.dateReceived !== undefined) data.dateReceived = merged.dateReceived;
+      if (merged.designationId !== undefined) data.designationId = merged.designationId;
+      if (merged.status !== undefined) data.status = merged.status;
+      if (merged.paymentType !== undefined) data.paymentType = merged.paymentType;
+      const api = createContributions(getClient());
+      outputResult(await api.update(contributionId, data), globalOpts);
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- Designations ---
+
+const designationsCmd = program
+  .command('designations')
+  .description('Manage designations');
+
+designationsCmd
+  .command('list')
+  .description('List designations')
+  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
+  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .action(async (options) => {
+    try {
+      const api = createDesignations(getClient());
+      outputResult(await api.list(options), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+designationsCmd
+  .command('get <designationId>')
+  .description('Get a designation by ID')
+  .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van designations expand-fields')
+  .action(async (designationId, options) => {
+    try {
+      validatePositiveInt(designationId, 'designationId');
+      const api = createDesignations(getClient());
+      outputResult(await api.get(designationId, options), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+designationsCmd
+  .command('expand-fields')
+  .description('List $expand fields for designations endpoints')
+  .action(() => {
+    outputResult({
+      resource: 'designations',
+      endpointExpandFields: {
+        '/designations/{designationId}': DESIGNATIONS_GET_EXPANDS
+      },
+      notes: [
+        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
+      ],
+      sources: [
+        'https://docs.ngpvan.com/reference/getdesignationbyid',
+        'VAN API INVALID_PARAMETER hint for $expand on /events/{eventId}'
+      ]
+    }, program.opts());
+  });
+
+// --- Signups ---
+
 const signupsCmd = program
   .command('signups')
   .description('Manage event signups');
 
 signupsCmd
   .command('list')
-  .description('List signups')
-  .option('--eventId <id>', 'Event ID filter', parseInt)
-  .option('--vanId <id>', 'Person VAN ID filter', parseInt)
+  .description('List signups filtered by eventId, vanId, or both (at least one required)')
+  .option('-e, --eventId <id>', 'Event ID', parseInt)
+  .option('-v, --vanId <id>', 'Person VAN ID', parseInt)
   .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-
-      if (options.eventId) params.eventId = options.eventId;
-      if (options.vanId) params.vanId = options.vanId;
-
-      const signups = await getClient().get('/signups', params);
+      if (!options.eventId && !options.vanId) {
+        console.error(chalk.red('Error: At least one of --eventId or --vanId is required.'));
+        process.exit(1);
+      }
+      const api = createSignups(getClient());
+      const signups = await api.list(options);
       outputResult(signups, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+signupsCmd
+  .command('get <eventSignupId>')
+  .description('Get an event signup by ID')
+  .action(async (eventSignupId) => {
+    try {
+      validatePositiveInt(eventSignupId, 'eventSignupId');
+      const api = createSignups(getClient());
+      outputResult(await api.get(eventSignupId), program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -1037,23 +1420,27 @@ signupsCmd
 signupsCmd
   .command('create')
   .description('Create a new signup')
-  .requiredOption('-e, --eventId <id>', 'Event ID', parseInt)
   .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
-  .option('-r, --role <role>', 'Person role at event')
-  .option('-s, --status <status>', 'Signup status')
+  .requiredOption('-e, --eventId <id>', 'Event ID', parseInt)
+  .requiredOption('--eventShiftId <id>', 'Event shift ID', parseInt)
+  .requiredOption('--roleId <id>', 'Role ID', parseInt)
+  .requiredOption('--statusId <id>', 'Status ID', parseInt)
+  .requiredOption('--locationId <id>', 'Location ID', parseInt)
   .action(async (options) => {
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
       const data: Record<string, unknown> = {
+        vanId: merged.vanId,
         eventId: merged.eventId,
-        vanId: merged.vanId
+        eventShiftId: merged.eventShiftId,
+        roleId: merged.roleId,
+        statusId: merged.statusId,
+        locationId: merged.locationId,
       };
 
-      if (merged.role) data.role = merged.role;
-      if (merged.status) data.status = merged.status;
-
-      const signup = await getClient().post('/signups', data);
+      const api = createSignups(getClient());
+      const signup = await api.create(data);
       outputResult(signup, globalOpts);
     } catch (error) {
       handleError(error);
@@ -1062,14 +1449,23 @@ signupsCmd
 
 signupsCmd
   .command('update <signupId>')
-  .description('Update a signup by ID')
-  .requiredOption('-d, --data <json>', 'JSON payload for signup update')
+  .description('Update a signup by ID (fetches existing signup then applies specified changes)')
+  .option('--eventShiftId <id>', 'Event Shift ID')
+  .option('--roleId <id>', 'Role ID')
+  .option('--statusId <id>', 'Status ID')
+  .option('--locationId <id>', 'Location ID')
   .action(async (signupId, options) => {
     try {
       validatePositiveInt(signupId, 'signupId');
-      const payload = parseJsonPayload(options);
-      const result = await getClient().put(`/signups/${signupId}`, payload);
-      outputResult(result, program.opts());
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+      const data: Record<string, unknown> = {};
+      if (merged.eventShiftId !== undefined) data.eventShiftId = merged.eventShiftId;
+      if (merged.roleId !== undefined) data.roleId = merged.roleId;
+      if (merged.statusId !== undefined) data.statusId = merged.statusId;
+      if (merged.locationId !== undefined) data.locationId = merged.locationId;
+      const api = createSignups(getClient());
+      outputResult(await api.update(signupId, data), globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -1081,14 +1477,16 @@ signupsCmd
   .action(async (signupId) => {
     try {
       validatePositiveInt(signupId, 'signupId');
-      const result = await getClient().delete(`/signups/${signupId}`);
+      const api = createSignups(getClient());
+      const result = await api.delete(signupId);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Scores commands
+// --- Scores ---
+
 const scoresCmd = program
   .command('scores')
   .description('Manage scores');
@@ -1100,11 +1498,8 @@ scoresCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-      const scores = await getClient().get('/scores', params);
+      const api = createScores(getClient());
+      const scores = await api.list(options);
       outputResult(scores, program.opts());
     } catch (error) {
       handleError(error);
@@ -1119,19 +1514,16 @@ scoresCmd
   .requiredOption('--value <value>', 'Score value', parseFloat)
   .action(async (options) => {
     try {
-      const data: Record<string, unknown> = {
-        scoreId: options.scoreId,
-        value: options.value
-      };
-
-      const result = await getClient().post(`/people/${options.vanId}/scores`, data);
+      const api = createScores(getClient());
+      const result = await api.apply(options.vanId, options.scoreId, options.value);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Custom Fields commands
+// --- Custom Fields ---
+
 const customFieldsCmd = program
   .command('custom-fields')
   .description('Manage custom fields');
@@ -1144,21 +1536,16 @@ customFieldsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-
-      if (options.fieldType) params.fieldType = options.fieldType;
-
-      const fields = await getClient().get('/customFields', params);
+      const api = createCustomFields(getClient());
+      const fields = await api.list(options);
       outputResult(fields, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Locations commands
+// --- Locations ---
+
 const locationsCmd = program
   .command('locations')
   .description('Manage locations');
@@ -1166,21 +1553,13 @@ const locationsCmd = program
 locationsCmd
   .command('list')
   .description('List locations')
-  .option('--locationType <type>', 'Location type filter')
-  .option('--state <state>', 'State filter')
+  .option('-n, --name <name>', 'Location name filter')
   .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-
-      if (options.locationType) params.locationType = options.locationType;
-      if (options.state) params.state = options.state;
-
-      const locations = await getClient().get('/locations', params);
+      const api = createLocations(getClient());
+      const locations = await api.list(options);
       outputResult(locations, program.opts());
     } catch (error) {
       handleError(error);
@@ -1188,34 +1567,74 @@ locationsCmd
   });
 
 locationsCmd
-  .command('find')
-  .description('Find locations by criteria')
-  .option('-n, --name <name>', 'Location name')
-  .option('-c, --city <city>', 'City name')
-  .option('-s, --state <state>', 'State')
-  .option('-z, --zip <zip>', 'ZIP code')
-  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
-  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .action(async (options) => {
+  .command('get <locationId>')
+  .description('Get a location by ID')
+  .action(async (locationId) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-
-      if (options.name) params.name = options.name;
-      if (options.city) params.city = options.city;
-      if (options.state) params.state = options.state;
-      if (options.zip) params.zip = options.zip;
-
-      const results = await getClient().get('/locations/find', params);
-      outputResult(results, program.opts());
+      validatePositiveInt(locationId, 'locationId');
+      const api = createLocations(getClient());
+      outputResult(await api.get(locationId), program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Bulk Import commands
+locationsCmd
+  .command('create')
+  .description('Create a location')
+  .requiredOption('-n, --name <name>', 'Name of location')
+  .option('--displayName <name>', 'Display name of location')
+  .option('--addressLine1 <address>', 'Address Line 1')
+  .option('--addressLine2 <address>', 'Address Line 2')
+  .option('--city <city>', 'City')
+  .option('--stateOrProvince <state>', 'State or Province')
+  .option('--zipOrPostalCode <zip>', 'Zip or Postal Code')
+  .option('--countryCode <country>', 'Country Code')
+  .action(async (options) => {
+    try {
+      const api = createLocations(getClient());
+      outputResult(await api.create(options), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+locationsCmd
+  .command('find-or-create')
+  .description('Find or Create a location')
+  .requiredOption('-n, --name <name>', 'Name of location')
+  .option('--displayName <name>', 'Display name of location')
+  .option('--addressLine1 <address>', 'Address Line 1')
+  .option('--addressLine2 <address>', 'Address Line 2')
+  .option('--city <city>', 'City')
+  .option('--stateOrProvince <state>', 'State or Province')
+  .option('--zipOrPostalCode <zip>', 'Zip or Postal Code')
+  .option('--countryCode <country>', 'Country Code')
+  .action(async (options) => {
+    try {
+      const api = createLocations(getClient());
+      outputResult(await api.findOrCreate(options), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+locationsCmd
+  .command('delete <locationId>')
+  .description('Delete a location by ID')
+  .action(async (locationId) => {
+    try {
+      validatePositiveInt(locationId, 'locationId');
+      const api = createLocations(getClient());
+      const result = await api.delete(locationId);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- Bulk Import ---
+
 const bulkImportCmd = program
   .command('bulk-import')
   .description('Manage bulk import jobs');
@@ -1228,21 +1647,16 @@ bulkImportCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-
-      if (options.status) params.status = options.status;
-
-      const jobs = await getClient().get('/bulkImportJobs', params);
+      const api = createBulkImport(getClient());
+      const jobs = await api.list(options);
       outputResult(jobs, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Changed Entity Export Jobs commands
+// --- Changed Entity Export Jobs ---
+
 const changedEntityExportCmd = program
   .command('changed-entity-exports')
   .description('Manage changed entity export jobs');
@@ -1255,14 +1669,8 @@ changedEntityExportCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-
-      if (options.status) params.status = options.status;
-
-      const jobs = await getClient().get('/changedEntityExportJobs', params);
+      const api = createChangedEntityExportJobs(getClient());
+      const jobs = await api.list(options);
       outputResult(jobs, program.opts());
     } catch (error) {
       handleError(error);
@@ -1286,37 +1694,16 @@ changedEntityExportCmd
       if (merged.dateChangedTo) data.dateChangedTo = validateDate(merged.dateChangedTo as string, 'dateChangedTo');
       if (merged.webhookUrl) data.webhookUrl = validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl');
 
-      const job = await getClient().post('/changedEntityExportJobs', data);
+      const api = createChangedEntityExportJobs(getClient());
+      const job = await api.create(data);
       outputResult(job, globalOpts);
     } catch (error) {
       handleError(error);
     }
   });
 
-// Contact Types commands
-const contactTypesCmd = program
-  .command('contact-types')
-  .description('Manage contact types');
+// --- Event Types ---
 
-contactTypesCmd
-  .command('list')
-  .description('List contact types')
-  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
-  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .action(async (options) => {
-    try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-      const types = await getClient().get('/contactTypes', params);
-      outputResult(types, program.opts());
-    } catch (error) {
-      handleError(error);
-    }
-  });
-
-// Event Types commands
 const eventTypesCmd = program
   .command('event-types')
   .description('Manage event types');
@@ -1328,18 +1715,29 @@ eventTypesCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-      const types = await getClient().get('/eventTypes', params);
+      const api = createEventTypes(getClient());
+      const types = await api.list(options);
       outputResult(types, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// Supporter Groups commands
+eventTypesCmd
+  .command('get <eventTypeId>')
+  .description('Get an event type by ID')
+  .action(async (eventTypeId) => {
+    try {
+      validatePositiveInt(eventTypeId, 'eventTypeId');
+      const api = createEventTypes(getClient());
+      outputResult(await api.get(eventTypeId), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- Supporter Groups ---
+
 const supporterGroupsCmd = program
   .command('supporter-groups')
   .description('Manage supporter groups');
@@ -1351,12 +1749,22 @@ supporterGroupsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const params: Record<string, unknown> = {
-        $top: options.top,
-        $skip: options.skip
-      };
-      const groups = await getClient().get('/supporterGroups', params);
+      const api = createSupporterGroups(getClient());
+      const groups = await api.list(options);
       outputResult(groups, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+  
+supporterGroupsCmd
+  .command('get <supporterGroupId>')
+  .description('Get a Supporter Group by ID')
+  .action(async (supporterGroupId) => {
+    try {
+      validatePositiveInt(supporterGroupId, 'supporterGroupId');
+      const api = createSupporterGroups(getClient());
+      outputResult(await api.get(supporterGroupId), program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -1377,7 +1785,8 @@ supporterGroupsCmd
 
       if (merged.description) data.description = merged.description;
 
-      const group = await getClient().post('/supporterGroups', data);
+      const api = createSupporterGroups(getClient());
+      const group = await api.create(data);
       outputResult(group, globalOpts);
     } catch (error) {
       handleError(error);
@@ -1385,14 +1794,13 @@ supporterGroupsCmd
   });
 
 supporterGroupsCmd
-  .command('update <groupId>')
-  .description('Update a supporter group by ID')
-  .requiredOption('-d, --data <json>', 'JSON payload for supporter group update')
-  .action(async (groupId, options) => {
+  .command('delete <supporterGroupId>')
+  .description('Delete a supporter group by ID')
+  .action(async (supporterGroupId) => {
     try {
-      validatePositiveInt(groupId, 'groupId');
-      const payload = parseJsonPayload(options);
-      const result = await getClient().put(`/supporterGroups/${groupId}`, payload);
+      validatePositiveInt(supporterGroupId, 'supporterGroupId');
+      const api = createSupporterGroups(getClient());
+      const result = await api.delete(supporterGroupId);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -1400,32 +1808,56 @@ supporterGroupsCmd
   });
 
 supporterGroupsCmd
-  .command('delete <groupId>')
-  .description('Delete a supporter group by ID')
-  .action(async (groupId) => {
+  .command('add-person <supporterGroupId> <vanId>')
+  .description('Add a person to a supporter group')
+  .action(async (supporterGroupId, vanId) => {
     try {
-      validatePositiveInt(groupId, 'groupId');
-      const result = await getClient().delete(`/supporterGroups/${groupId}`);
+      validatePositiveInt(supporterGroupId, 'supporterGroupId');
+      validatePositiveInt(vanId, 'vanId');
+      const api = createSupporterGroups(getClient());
+      const result = await api.addPerson(supporterGroupId, vanId);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// API Key Profiles command
-program
+  
+supporterGroupsCmd
+  .command('remove-person <supporterGroupId> <vanId>')
+  .description('Remove a person from a supporter group')
+  .action(async (supporterGroupId, vanId) => {
+    try {
+      validatePositiveInt(supporterGroupId, 'supporterGroupId');
+      validatePositiveInt(vanId, 'vanId');
+      const api = createSupporterGroups(getClient());
+      const result = await api.removePerson(supporterGroupId, vanId);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- API Key Profiles ---
+
+const apiKeyProfilesCmd = program
   .command('api-key-profiles')
+  .description('Manage API key profiles');
+
+apiKeyProfilesCmd
+  .command('get')
   .description('Get API key profile details for the current API key')
   .action(async () => {
     try {
-      const profileDetails = await getClient().get('/apiKeyProfiles');
+      const api = createApiKeyProfiles(getClient());
+      const profileDetails = await api.get();
       outputResult(profileDetails, program.opts());
     } catch (error) {
       handleError(error);
     }
   });
 
-// --- Config commands ---
+// --- Config ---
 
 import {
   loadConfig, saveConfig, getConfigPath, listProfiles,
@@ -1514,7 +1946,8 @@ configCmd
     console.log(getConfigPath());
   });
 
-// ── Generic API command ─────────────────────────────────────────────
+// --- Generic API ---
+
 const apiCmd = program
   .command('api')
   .description('Make raw API requests to any VAN endpoint.\n\nUseful for endpoints not yet wrapped by the CLI.\nAPI reference: https://docs.ngpvan.com (append .md for agent-friendly format)');

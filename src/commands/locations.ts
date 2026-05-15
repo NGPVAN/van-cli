@@ -14,8 +14,7 @@ const create = function(client: VanApiClientLike) {
      * @param {Object} options - Optional parameters
      * @param {number} options.top - Number of results
      * @param {number} options.skip - Number of results to skip
-     * @param {string} options.locationType - Location type filter
-     * @param {string} options.state - State filter
+     * @param {string} options.name - Location name filter
      * @returns {Promise<Object>} List of locations
      */
     async list(options = {}) {
@@ -23,10 +22,9 @@ const create = function(client: VanApiClientLike) {
         $top: options.top || 50,
         $skip: options.skip || 0
       };
-      
-      if (options.locationType) params.locationType = options.locationType;
-      if (options.state) params.state = options.state;
-      
+
+      if (options.name) params.name = options.name;
+
       return client.get('/locations', params);
     },
     
@@ -40,37 +38,17 @@ const create = function(client: VanApiClientLike) {
     },
     
     /**
-     * Find locations by search criteria
-     * @param {Object} criteria - Search criteria
-     * @param {string} criteria.name - Location name
-     * @param {string} criteria.city - City name
-     * @param {string} criteria.state - State
-     * @param {string} criteria.zip - ZIP code
-     * @param {number} criteria.top - Number of results
-     * @param {number} criteria.skip - Number of results to skip
-     * @returns {Promise<Object>} Search results
-     */
-    async find(criteria = {}) {
-      const params = {
-        $top: criteria.top || 50,
-        $skip: criteria.skip || 0
-      };
-      
-      if (criteria.name) params.name = criteria.name;
-      if (criteria.city) params.city = criteria.city;
-      if (criteria.state) params.state = criteria.state;
-      if (criteria.zip) params.zip = criteria.zip;
-      
-      return client.get('/locations', params);
-    },
-    
-    /**
      * Create a new location
      * @param {Object} locationData - Location data
      * @param {string} locationData.name - Location name (required)
-     * @param {string} locationData.displayName - Display name
-     * @param {Object} locationData.address - Address object
-     * @param {string} locationData.locationType - Location type
+     * @param {string} locationData.displayName - Display name (optional; defaults to name if omitted)
+     * @param {Object} locationData.address - Address object (optional)
+     * @param {string} locationData.address.addressLine1 - Street address line 1
+     * @param {string} locationData.address.addressLine2 - Street address line 2
+     * @param {string} locationData.address.city - City
+     * @param {string} locationData.address.stateOrProvince - State/province code
+     * @param {string} locationData.address.zipOrPostalCode - ZIP/postal code
+     * @param {string} locationData.address.countryCode - Country code (e.g., 'US')
      * @returns {Promise<Object>} Created location object
      */
     async create(locationData) {
@@ -80,46 +58,74 @@ const create = function(client: VanApiClientLike) {
           throw new Error(`Required field '${field}' is missing`);
         }
       }
-      
-      return client.post('/locations', locationData);
+
+      const body: Record<string, unknown> = {
+        name: locationData.name,
+        displayName: locationData.displayName || locationData.name,
+        address: {}
+      };
+
+      if (locationData.addressLine1) body.address.addressLine1 = locationData.addressLine1;
+      if (locationData.addressLine2) body.address.addressLine2 = locationData.addressLine2;
+      if (locationData.city) body.address.city = locationData.city;
+      if (locationData.stateOrProvince) body.address.stateOrProvince = locationData.stateOrProvince;
+      if (locationData.zipOrPostalCode) body.address.zipOrPostalCode = locationData.zipOrPostalCode;
+      if (locationData.countryCode) body.address.countryCode = locationData.countryCode;
+
+      return client.post('/locations', body);
+    },
+
+        /**
+     * Find-or-Create a new location
+     * @param {Object} locationData - Location data
+     * @param {string} locationData.name - Location name (required)
+     * @param {string} locationData.displayName - Display name (optional; defaults to name if omitted)
+     * @param {Object} locationData.address - Address object (optional)
+     * @param {string} locationData.address.addressLine1 - Street address line 1
+     * @param {string} locationData.address.addressLine2 - Street address line 2
+     * @param {string} locationData.address.city - City
+     * @param {string} locationData.address.stateOrProvince - State/province code
+     * @param {string} locationData.address.zipOrPostalCode - ZIP/postal code
+     * @param {string} locationData.address.countryCode - Country code (e.g., 'US')
+     * @returns {Promise<Object>} Created location object
+     */
+    async findOrCreate(locationData) {
+      const requiredFields = ['name'];
+      for (const field of requiredFields) {
+        if (!locationData[field]) {
+          throw new Error(`Required field '${field}' is missing`);
+        }
+      }
+
+      const body: Record<string, unknown> = {
+        name: locationData.name,
+        displayName: locationData.displayName || locationData.name,
+        address: {}
+      };
+
+      if (locationData.addressLine1) body.address.addressLine1 = locationData.addressLine1;
+      if (locationData.addressLine2) body.address.addressLine2 = locationData.addressLine2;
+      if (locationData.city) body.address.city = locationData.city;
+      if (locationData.stateOrProvince) body.address.stateOrProvince = locationData.stateOrProvince;
+      if (locationData.zipOrPostalCode) body.address.zipOrPostalCode = locationData.zipOrPostalCode;
+      if (locationData.countryCode) body.address.countryCode = locationData.countryCode;
+
+      return client.post('/locations/findOrCreate', body);
     },
     
     /**
-     * Update a location
+     * Delete a location
      * @param {number} locationId - The location ID
-     * @param {Object} locationData - Updated location data
      * @returns {Promise<Object>} Updated location object
      */
-    async update(locationId, locationData) {
-      return client.put(`/locations/${locationId}`, locationData);
+    async delete(locationId) {
+      try {
+        await client.delete(`/locations/${locationId}`);
+        return `Location ${locationId} deleted`;
+      } catch (error) {
+        throw new Error(`Failed to delete location ${locationId}`, { cause: error });
+      }
     },
-    
-    /**
-     * Get events for a specific location
-     * @param {number} locationId - Location ID
-     * @param {Object} options - Optional parameters
-     * @param {number} options.top - Number of results
-     * @param {number} options.skip - Number of results to skip
-     * @returns {Promise<Object>} List of events at the location
-     */
-    async getEvents(locationId, options = {}) {
-      const params = {
-        $top: options.top || 50,
-        $skip: options.skip || 0
-      };
-      
-      return client.get(`/locations/${locationId}/events`, params);
-    },
-    
-    /**
-     * Get all locations (automatically paginated)
-     * @param {Object} criteria - Filter criteria
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all locations
-     */
-    async getAll(criteria = {}, maxResults = 10000) {
-      return client.getAllPaginated('/locations', criteria, maxResults);
-    }
   };
 };
 

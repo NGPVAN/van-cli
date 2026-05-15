@@ -145,51 +145,53 @@ import { VanApi } from 'van-cli';
 const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 ```
 
-- `people`: `get`, `find`, `quickSearch`, `findOrCreate`, `create`, `update`, `getAll`
-- `activistCodes`: `list`, `get`, `getAll`, `apply`, `remove`
-- `surveyQuestions`: `list`, `get`, `getAll`, `recordResponse`
-- `events`: `list`, `get`, `create`, `update`, `delete`, `getSignups`, `getAll`
-- `savedLists`: `list`, `get`, `create`, `update`, `delete`, `getPeople`, `addPerson`, `removePerson`, `getAll`
+- `people`: `get`, `list`, `quickSearch`, `findOrCreate`, `create`, `update`, `delete`, `getAll`
+- `activistCodes`: `list`, `get`
+- `surveyQuestions`: `list`, `get`
+- `events`: `list`, `get`, `create`, `update`, `delete`
+- `savedLists`: `list`, `get`
 - `exportJobs`: `list`, `get`, `create`, `getDownloadUrl`, `getAll`
-- `canvassResponses`: `list`, `get`, `create`, `getByPerson`, `getAll`
-- `contributions`: `list`, `get`, `create`, `update`, `getByPerson`, `getAll`
-- `signups`: `list`, `get`, `create`, `update`, `delete`, `getByEvent`, `getByPerson`, `getAll`
+- `canvassResponses`: `create`, `list`, `inputTypes`, `resultCodes`, `contactTypes`
+- `contributions`: `list`, `get`, `create`, `update`
+- `designations`: `list`, `get`
+- `signups`: `list`, `get`, `create`, `update`, `delete`
 - `notes`: `list`, `get`, `create`, `update`, `delete`, `getByPerson`, `getAll`
 - `scores`: `list`, `get`, `getAll`, `apply`, `getByPerson`, `update`, `remove`
 - `customFields`: `list`, `get`, `getAll`, `setValue`, `getByPerson`, `updateValue`, `removeValue`
 - `codes`: `list`, `listResultCodes`, `getResultCode`, `listContactTypes`, `getContactType`, `listInputTypes`, `getInputType`, `listSupporterGroups`, `getSupporterGroup`, `getAllResultCodes`, `getAllContactTypes`
 - `targets`: `list`, `get`, `create`, `update`, `delete`, `getPeople`, `addPerson`, `removePerson`, `getAll`
 - `stories`: `list`, `get`, `create`, `update`, `delete`, `getByPerson`, `getAll`
-- `emails`: `list`, `get`, `create`, `update`, `send`, `getStats`, `getRecipients`, `getAll`
+- `targetedEmails`: `list`, `get`
 - `bulkImport`: `list`, `listJobs`, `getJob`, `createJob`, `uploadData`, `startJob`, `cancelJob`, `getJobResults`, `getJobErrors`, `getAllJobs`
 - `changedEntityExportJobs`: `list`, `get`, `create`, `getDownloadUrl`, `cancel`, `getStatus`, `getAll`
-- `locations`: `list`, `get`, `find`, `create`, `update`, `getEvents`, `getAll`
-- `contactTypes`: `list`, `get`, `getAll`
-- `eventTypes`: `list`, `get`, `getAll`
-- `supporterGroups`: `list`, `get`, `create`, `update`, `addPerson`, `removePerson`, `getPeople`, `getAll`
+- `locations`: `list`, `get`, `create`, `findOrCreate`, `delete`
+- `eventTypes`: `list`, `get`
+- `supporterGroups`: `list`, `get`, `create`, `addPerson`, `removePerson`, `delete`
+- `apiKeyProfiles`: `get`
 
 ### CLI support (current command coverage)
 
 The CLI currently implements a subset of SDK methods:
 
-- `people`: `get`, `find`, `quick-search`, `find-or-create`, `update`, `delete`
-- `activist-codes`: `list`
-- `survey-questions`: `list`
-- `events`: `list`, `update`, `delete`
-- `saved-lists`: `list`, `update`, `delete`
+- `people`: `expand-fields`, `get`, `list`, `quick-search`, `find-or-create`, `create`, `update`, `delete`
+- `activist-codes`: `list`, `get`
+- `survey-questions`: `list`, `get`
+- `events`: `list`, `expand-fields`, `get`, `create`, `update`, `delete`
+- `saved-lists`: `list`, `get`
 - `export-jobs`: `create`
-- `canvass-responses`: `create`
+- `canvass-responses`: `create`, `list`, `input-types`, `result-codes`, `contact-types`
 - `notes`: `create`, `update`, `delete`
-- `contributions`: `list`, `get`
+- `contributions`: `list`, `get`, `create`, `update`
+- `designations`: `expand-fields`, `list`, `get`
 - `signups`: `list`, `create`, `update`, `delete`
 - `scores`: `list`, `apply`
 - `custom-fields`: `list`
-- `locations`: `list`, `find`
+- `locations`: `list`, `get`, `create`, `find-or-create`, `delete`
+- `targeted-emails`: `list`, `get`
 - `bulk-import`: `list`
 - `changed-entity-exports`: `list`, `create`
-- `contact-types`: `list`
-- `event-types`: `list`
-- `supporter-groups`: `list`, `create`, `update`, `delete`
+- `event-types`: `list`, `get`
+- `supporter-groups`: `list`, `get`, `create`, `add-person`, `remove-person`, `delete`
 - `api-key-profiles`
 
 ## Robustness features

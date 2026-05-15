@@ -19,7 +19,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist coverage",
     "dev": "node dist/cli.js",
-    "test": "npm run build && jest --runInBand",
+    "test": "npm run clean && npm run build && jest --runInBand",
     "test:coverage": "npm run build && jest --coverage --runInBand",
     "prepack": "npm run clean && tsc -p tsconfig.build.json"
   },

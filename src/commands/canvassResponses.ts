@@ -10,82 +10,54 @@ import type { VanApiClientLike } from '../types';
 const create = function(client: VanApiClientLike) {
   return {
     /**
-     * List canvass responses
+     * Create a new canvass response
+     * @param {Object} responseData - Canvass response data
+     * @param {number} responseData.vanId - Person's VAN ID (required)
+     * @param {number} responseData.resultCodeId - Result code ID (required)
+     * @param {Object} responseData.canvassContext - Canvass context (optional)
+     * @returns {Promise<Object>} Created canvass response object
+     */
+    async create(responseData) {
+      const vanId = responseData.vanId;
+      if (!vanId) {
+        throw new Error('Required field \'vanId\' is missing');
+      }
+      const body = {
+        includeReferenceIdInResponse: true
+      };
+      if (responseData.resultCodeId !== undefined) body.resultCodeId = responseData.resultCodeId;
+      if (responseData.canvassContext !== undefined) body.canvassContext = responseData.canvassContext;
+
+      return client.post(`/people/${vanId}/canvassResponses`, body);
+    },
+    
+    /**
+     * Get canvass responses for a specific person
      * @param {Object} options - Optional parameters
      * @param {number} options.top - Number of results
      * @param {number} options.skip - Number of results to skip
-     * @param {string} options.startDate - Start date filter
-     * @param {string} options.endDate - End date filter
-     * @returns {Promise<Object>} List of canvass responses
+     * @returns {Promise<Object>} List of canvass responses for the person
      */
     async list(options = {}) {
       const params = {
         $top: options.top || 50,
         $skip: options.skip || 0
       };
-      
-      if (options.startDate) params.startDate = options.startDate;
-      if (options.endDate) params.endDate = options.endDate;
-      
-      return client.get('/canvassResponses', params);
+
+      return client.get(`/people/${options.vanId}/canvassResponses`, params);
     },
-    
-    /**
-     * Get a specific canvass response by ID
-     * @param {number} canvassResponseId - The canvass response ID
-     * @returns {Promise<Object>} Canvass response object
-     */
-    async get(canvassResponseId) {
-      return client.get(`/canvassResponses/${canvassResponseId}`);
+
+    async inputTypes() {
+      return client.get('/canvassResponses/inputTypes');
     },
-    
-    /**
-     * Create a new canvass response
-     * @param {Object} responseData - Canvass response data
-     * @param {number} responseData.vanId - Person's VAN ID (required)
-     * @param {number} responseData.resultCodeId - Result code ID (required)
-     * @param {string} responseData.canvassContext - Canvass context
-     * @param {string} responseData.contactTypeId - Contact type ID
-     * @param {Array} responseData.responses - Array of survey responses
-     * @returns {Promise<Object>} Created canvass response object
-     */
-    async create(responseData) {
-      const requiredFields = ['vanId', 'resultCodeId'];
-      for (const field of requiredFields) {
-        if (!responseData[field]) {
-          throw new Error(`Required field '${field}' is missing`);
-        }
-      }
-      
-      return client.post('/canvassResponses', responseData);
+
+    async resultCodes() {
+      return client.get('/canvassResponses/resultCodes');
     },
-    
-    /**
-     * Get canvass responses for a specific person
-     * @param {number} vanId - Person's VAN ID
-     * @param {Object} options - Optional parameters
-     * @param {number} options.top - Number of results
-     * @param {number} options.skip - Number of results to skip
-     * @returns {Promise<Object>} List of canvass responses for the person
-     */
-    async getByPerson(vanId, options = {}) {
-      const params = {
-        $top: options.top || 50,
-        $skip: options.skip || 0
-      };
-      
-      return client.get(`/people/${vanId}/canvassResponses`, params);
+
+    async contactTypes() {
+      return client.get('/canvassResponses/contactTypes');
     },
-    
-    /**
-     * Get all canvass responses (automatically paginated)
-     * @param {Object} criteria - Filter criteria
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all canvass responses
-     */
-    async getAll(criteria = {}, maxResults = 10000) {
-      return client.getAllPaginated('/canvassResponses', criteria, maxResults);
-    }
   };
 };
 

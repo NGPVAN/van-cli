@@ -25,10 +25,10 @@ const create = function(client: VanApiClientLike) {
         $skip: options.skip || 0
       };
       
-      if (options.startDate) params.startDate = options.startDate;
-      if (options.endDate) params.endDate = options.endDate;
+      if (options.startDate) params.startingAfter = options.startDate;
+      if (options.endDate) params.startingBefore = options.endDate;
       if (options.$expand) params.$expand = options.$expand;
-      
+
       return client.get('/events', params);
     },
     
@@ -43,23 +43,26 @@ const create = function(client: VanApiClientLike) {
       return client.get(`/events/${eventId}`, options);
     },
     
-    /**
-     * Create a new event
-     * @param {Object} eventData - Event data
-     * @param {string} eventData.name - Event name (required)
-     * @param {string} eventData.startDate - Start date (required)
-     * @param {string} eventData.endDate - End date (required)
-     * @returns {Promise<Object>} Created event object
-     */
     async create(eventData) {
-      const requiredFields = ['name', 'startDate', 'endDate'];
+      const requiredFields = ['eventTypeId', 'name', 'startDate', 'endDate', 'locationId', 'roleId', 'shiftStartTime', 'shiftEndTime'];
       for (const field of requiredFields) {
         if (!eventData[field]) {
           throw new Error(`Required field '${field}' is missing`);
         }
       }
-      
-      return client.post('/events', eventData);
+
+      const body = {
+        eventType: { eventTypeId: eventData.eventTypeId },
+        name: eventData.name,
+        shortName: eventData.shortName || eventData.name,
+        startDate: eventData.startDate,
+        endDate: eventData.endDate,
+        locations: [{ locationId: eventData.locationId }],
+        roles: [{ roleId: eventData.roleId }],
+        shifts: [{ startTime: eventData.shiftStartTime, endTime: eventData.shiftEndTime }],
+      };
+
+      return client.post('/events', body);
     },
     
     /**
@@ -69,7 +72,23 @@ const create = function(client: VanApiClientLike) {
      * @returns {Promise<Object>} Updated event object
      */
     async update(eventId, eventData) {
-      return client.put(`/events/${eventId}`, eventData);
+      const existing = await client.get(`/events/${eventId}`);
+
+      if (eventData.eventTypeId !== undefined) existing.eventType = { eventTypeId: eventData.eventTypeId };
+      if (eventData.name !== undefined) existing.name = eventData.name;
+      if (eventData.shortName !== undefined) existing.shortName = eventData.shortName;
+      if (eventData.startDate !== undefined) existing.startDate = eventData.startDate;
+      if (eventData.endDate !== undefined) existing.endDate = eventData.endDate;
+      if (eventData.locationId !== undefined) existing.locations = [{ locationId: eventData.locationId }];
+      if (eventData.roleId !== undefined) existing.roles = [{ roleId: eventData.roleId }];
+      if (eventData.shiftStartTime !== undefined || eventData.shiftEndTime !== undefined) {
+        const shift = (existing.shifts && existing.shifts[0]) ? { ...existing.shifts[0] } : {};
+        if (eventData.shiftStartTime !== undefined) shift.startTime = eventData.shiftStartTime;
+        if (eventData.shiftEndTime !== undefined) shift.endTime = eventData.shiftEndTime;
+        existing.shifts = [shift];
+      }
+
+      return client.put(`/events/${eventId}`, existing);
     },
     
     /**
@@ -78,35 +97,13 @@ const create = function(client: VanApiClientLike) {
      * @returns {Promise<Object>} Response
      */
     async delete(eventId) {
-      return client.delete(`/events/${eventId}`);
+      try {
+        await client.delete(`/events/${eventId}`);
+        return `Event ${eventId} deleted`;
+      } catch (error) {
+        throw new Error(`Failed to delete event ${eventId}`, { cause: error });
+      }
     },
-    
-    /**
-     * Get event signups
-     * @param {number} eventId - The event ID
-     * @param {Object} options - Optional parameters
-     * @param {number} options.top - Number of results
-     * @param {number} options.skip - Number of results to skip
-     * @returns {Promise<Object>} List of signups
-     */
-    async getSignups(eventId, options = {}) {
-      const params = {
-        $top: options.top || 50,
-        $skip: options.skip || 0
-      };
-      
-      return client.get(`/events/${eventId}/signups`, params);
-    },
-    
-    /**
-     * Get all events (automatically paginated)
-     * @param {Object} criteria - Filter criteria
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all events
-     */
-    async getAll(criteria = {}, maxResults = 1000) {
-      return client.getAllPaginated('/events', criteria, maxResults);
-    }
   };
 };
 

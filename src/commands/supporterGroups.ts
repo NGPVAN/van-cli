@@ -51,69 +51,49 @@ const create = function(client: VanApiClientLike) {
       
       return client.post('/supporterGroups', groupData);
     },
-    
-    /**
-     * Update a supporter group
-     * @param {number} supporterGroupId - The supporter group ID
-     * @param {Object} groupData - Updated group data
-     * @returns {Promise<Object>} Updated supporter group object
-     */
-    async update(supporterGroupId, groupData) {
-      return client.put(`/supporterGroups/${supporterGroupId}`, groupData);
-    },
-    
+
     /**
      * Add a person to a supporter group
      * @param {number} supporterGroupId - Supporter group ID
      * @param {number} vanId - Person's VAN ID
-     * @param {Object} options - Additional options
      * @returns {Promise<Object>} Response
      */
-    async addPerson(supporterGroupId, vanId, options = {}) {
-      const data = {
-        vanId: vanId,
-        ...options
-      };
-      
-      return client.post(`/supporterGroups/${supporterGroupId}/people`, data);
+    async addPerson(supporterGroupId, vanId) {
+      try {
+        await client.put(`/supporterGroups/${supporterGroupId}/people/${vanId}`);
+        return `Van ID ${vanId} added to Supporter Group ${supporterGroupId}`;
+      } catch (error) {
+        throw new Error(`Failed to add Van ID ${vanId} to Supporter Group ${supporterGroupId}`, { cause: error });
+      }
     },
-    
+
     /**
      * Remove a person from a supporter group
      * @param {number} supporterGroupId - Supporter group ID
-     * @param {number} vanId - Person's VAN ID
      * @returns {Promise<Object>} Response
      */
     async removePerson(supporterGroupId, vanId) {
-      return client.delete(`/supporterGroups/${supporterGroupId}/people/${vanId}`);
+      try {
+        await client.delete(`/supporterGroups/${supporterGroupId}/people/${vanId}`);
+        return `Van ID ${vanId} removed from Supporter Group ${supporterGroupId}`;
+      } catch (error) {
+        throw new Error(`Failed to remove Van ID ${vanId} from Supporter Group ${supporterGroupId}`, { cause: error });
+      }
     },
-    
+
     /**
-     * Get people in a supporter group
+     * Deletes a supporter group
      * @param {number} supporterGroupId - Supporter group ID
-     * @param {Object} options - Optional parameters
-     * @param {number} options.top - Number of results
-     * @param {number} options.skip - Number of results to skip
-     * @returns {Promise<Object>} List of people in the group
+     * @returns {Promise<Object>} Response
      */
-    async getPeople(supporterGroupId, options = {}) {
-      const params = {
-        $top: options.top || 50,
-        $skip: options.skip || 0
-      };
-      
-      return client.get(`/supporterGroups/${supporterGroupId}/people`, params);
+    async delete(supporterGroupId) {
+      try {
+        await client.delete(`/supporterGroups/${supporterGroupId}`);
+        return `Supporter Group ${supporterGroupId} deleted`;
+      } catch (error) {
+        throw new Error(`Failed to delete Supporter Group ${supporterGroupId}`, { cause: error });
+      }
     },
-    
-    /**
-     * Get all supporter groups (automatically paginated)
-     * @param {Object} criteria - Filter criteria
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all supporter groups
-     */
-    async getAll(criteria = {}, maxResults = 1000) {
-      return client.getAllPaginated('/supporterGroups', criteria, maxResults);
-    }
   };
 };
 

@@ -42,21 +42,32 @@ const create = function(client: VanApiClientLike) {
     /**
      * Create a new signup
      * @param {Object} signupData - Signup data
-     * @param {number} signupData.eventId - Event ID (required)
      * @param {number} signupData.vanId - Person's VAN ID (required)
-     * @param {string} signupData.role - Person's role at the event
-     * @param {string} signupData.status - Signup status
+     * @param {number} signupData.eventId - Event ID (required)
+     * @param {number} signupData.eventShiftId - Event shift ID (required)
+     * @param {number} signupData.roleId - Role ID (required)
+     * @param {number} signupData.statusId - Status ID (required)
+     * @param {number} signupData.locationId - Location ID (required)
      * @returns {Promise<Object>} Created signup object
      */
     async create(signupData) {
-      const requiredFields = ['eventId', 'vanId'];
+      const requiredFields = ['vanId', 'eventId', 'eventShiftId', 'roleId', 'statusId', 'locationId'];
       for (const field of requiredFields) {
         if (!signupData[field]) {
           throw new Error(`Required field '${field}' is missing`);
         }
       }
-      
-      return client.post('/signups', signupData);
+
+      const body = {
+        person: { vanId: signupData.vanId },
+        event: { eventId: signupData.eventId },
+        shift: { eventShiftId: signupData.eventShiftId },
+        role: { roleId: signupData.roleId },
+        status: { statusId: signupData.statusId },
+        location: { locationId: signupData.locationId },
+      };
+
+      return client.post('/signups', body);
     },
     
     /**
@@ -66,61 +77,30 @@ const create = function(client: VanApiClientLike) {
      * @returns {Promise<Object>} Updated signup object
      */
     async update(signupId, signupData) {
-      return client.put(`/signups/${signupId}`, signupData);
+      const existing = await client.get(`/signups/${signupId}`);
+
+      if (signupData.eventShiftId) existing.shift = { eventShiftId: signupData.eventShiftId };
+      if (signupData.roleId) existing.role = { roleId: signupData.roleId };
+      if (signupData.statusId) existing.status = { statusId: signupData.statusId };
+      if (signupData.locationId) existing.location = { locationId: signupData.locationId };
+
+      const response = await client.put(`/signups/${signupId}`, existing);
+      return (response !== null) ? response : this.get(signupId);
     },
-    
+
     /**
      * Delete a signup
      * @param {number} signupId - The signup ID
      * @returns {Promise<Object>} Response
      */
     async delete(signupId) {
-      return client.delete(`/signups/${signupId}`);
+      try {
+        await client.delete(`/signups/${signupId}`);
+        return `Signup ${signupId} deleted`;
+      } catch (error) {
+        throw new Error(`Failed to delete signupId ${signupId}`, { cause: error });
+      }
     },
-    
-    /**
-     * Get signups for a specific event
-     * @param {number} eventId - Event ID
-     * @param {Object} options - Optional parameters
-     * @param {number} options.top - Number of results
-     * @param {number} options.skip - Number of results to skip
-     * @returns {Promise<Object>} List of signups for the event
-     */
-    async getByEvent(eventId, options = {}) {
-      const params = {
-        $top: options.top || 50,
-        $skip: options.skip || 0
-      };
-      
-      return client.get(`/events/${eventId}/signups`, params);
-    },
-    
-    /**
-     * Get signups for a specific person
-     * @param {number} vanId - Person's VAN ID
-     * @param {Object} options - Optional parameters
-     * @param {number} options.top - Number of results
-     * @param {number} options.skip - Number of results to skip
-     * @returns {Promise<Object>} List of signups for the person
-     */
-    async getByPerson(vanId, options = {}) {
-      const params = {
-        $top: options.top || 50,
-        $skip: options.skip || 0
-      };
-      
-      return client.get(`/people/${vanId}/signups`, params);
-    },
-    
-    /**
-     * Get all signups (automatically paginated)
-     * @param {Object} criteria - Filter criteria
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all signups
-     */
-    async getAll(criteria = {}, maxResults = 10000) {
-      return client.getAllPaginated('/signups', criteria, maxResults);
-    }
   };
 };
 
