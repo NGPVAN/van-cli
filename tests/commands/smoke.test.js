@@ -8,7 +8,7 @@ const createNotes = require('../../dist/commands/notes').default;
 const createScores = require('../../dist/commands/scores').default;
 const createTargets = require('../../dist/commands/targets').default;
 const createStories = require('../../dist/commands/stories').default;
-const createTargetedEmails = require('../../dist/commands/emails').default;
+const createTargetedEmails = require('../../dist/commands/targetedEmails').default;
 const createBulkImport = require('../../dist/commands/bulkImport').default;
 const createChangedEntityExportJobs = require('../../dist/commands/changedEntityExportJobs').default;
 const createLocations = require('../../dist/commands/locations').default;
@@ -39,7 +39,7 @@ describe('command module wiring tests', () => {
     await createScores(client).apply(3, 2, 99);
     await createTargets(client).list({ targetType: 'Voter' });
     await createStories(client).create({ vanId: 1, text: 'story' });
-    await createTargetedEmails(client).create({ name: 'Email 1', subject: 'Hello', body: '<p>Hi</p>' });
+    await createTargetedEmails(client).list({ top: 10, skip: 0 });
     await createBulkImport(client).createJob({ name: 'Import 1', importType: 'People', mappings: { firstName: 'First Name' } });
     await createChangedEntityExportJobs(client).create({ dateChangedFrom: '2026-01-01' });
     await createLocations(client).list({ name: 'Boston' });

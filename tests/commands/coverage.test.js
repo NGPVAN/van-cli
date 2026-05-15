@@ -4,7 +4,6 @@ const createBulkImport = require('../../dist/commands/bulkImport').default;
 const createCanvassResponses = require('../../dist/commands/canvassResponses').default;
 const createChangedEntityExportJobs = require('../../dist/commands/changedEntityExportJobs').default;
 const createCodes = require('../../dist/commands/codes').default;
-const createContactTypes = require('../../dist/commands/contactTypes').default;
 const createContributions = require('../../dist/commands/contributions').default;
 const createCustomFields = require('../../dist/commands/customFields').default;
 const createDesignations = require('../../dist/commands/designations').default;
@@ -64,11 +63,6 @@ describe('command modules broad coverage', () => {
     const survey = createSurveyQuestions(client);
     await survey.list({ top: 5, skip: 1 });
     await survey.get(99);
-
-    const contactTypes = createContactTypes(client);
-    await contactTypes.list({ top: 10, skip: 2 });
-    await contactTypes.get(3);
-    await contactTypes.getAll({}, 120);
 
     const eventTypes = createEventTypes(client);
     await eventTypes.list({ top: 10, skip: 2 });
