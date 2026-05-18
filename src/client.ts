@@ -1,5 +1,6 @@
 import { version } from '../package.json';
 import { VanApiError } from './errors';
+import { Agent } from 'undici';
 import type { VanApiClientLike, VanApiClientOptions, VanParams, VanPayload } from './types';
 
 const DEFAULT_BASE_URL = 'https://api.securevan.com/v4';
@@ -108,7 +109,7 @@ export class VanApiClient implements VanApiClientLike {
 
     this.apiKey = withDefaultDatabaseMode(normalizedOptions.apiKey ?? process.env.VAN_API_KEY ?? '');
     this.appName = normalizedOptions.appName ?? process.env.VAN_APP_NAME ?? 'default_user';
-    this.baseURL = normalizedOptions.baseURL ?? DEFAULT_BASE_URL;
+    this.baseURL = normalizedOptions.baseURL ?? process.env.VAN_BASE_URL ?? DEFAULT_BASE_URL;
     this.timeoutMs = normalizedOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = normalizedOptions.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryBaseDelayMs = normalizedOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
@@ -144,7 +145,12 @@ export class VanApiClient implements VanApiClientLike {
       let response: FetchLikeResponse;
       try {
         const fetchFn = (globalThis as { fetch: FetchLike }).fetch;
-        response = await fetchFn(url, init);
+        response = await fetchFn(url, {
+          ...init,
+          dispatcher: isLocalhostUrl(url)
+            ? insecureLocalDispatcher
+            : undefined,
+        });
       } catch (error) {
         clearTimeout(timeout);
         throw new Error('Network error: No response received from VAN API');
@@ -252,5 +258,25 @@ function safeJsonParse(text: string): unknown {
     return text;
   }
 }
+
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+
+    return (
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1' ||
+      parsed.hostname.endsWith('.localhost')
+    );
+  } catch {
+    return false;
+  }
+}
+
+const insecureLocalDispatcher = new Agent({
+  connect: {
+    rejectUnauthorized: false,
+  },
+});
 
 export default VanApiClient;

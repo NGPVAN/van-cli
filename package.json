@@ -38,7 +38,8 @@
   },
   "dependencies": {
     "chalk": "^4.1.2",
-    "commander": "^11.1.0"
+    "commander": "^11.1.0",
+    "undici": "^6.25.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

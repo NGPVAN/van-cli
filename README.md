@@ -22,6 +22,9 @@ export VAN_APP_NAME="your-app-name"
 
 # If the database mode suffix is omitted, van-cli assumes MyCampaign (|1)
 export VAN_API_KEY="your-api-key"
+
+# Optional URL instead of securevan.com
+export VAN_BASE_URL="https://api.mycustomvan.com/v4"
 ```
 
 ### Option 2: `van config add`
