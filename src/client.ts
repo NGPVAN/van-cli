@@ -2,10 +2,12 @@ import { version } from '../package.json';
 import { VanApiError } from './errors';
 import type { VanApiClientLike, VanApiClientOptions, VanParams, VanPayload } from './types';
 
+export const DEFAULT_LOGIN_URL = 'https://api.securevan.com';
 const DEFAULT_BASE_URL = 'https://api.securevan.com/v4';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 350;
+const DATABASE_MODE_MY_CAMPAIGN = 1;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -51,7 +53,7 @@ function withDefaultDatabaseMode(apiKey: string): string {
 function normalizeApiKeyMode(apiKey: string): number {
   const parts = apiKey.split('|');
   if (parts.length !== 2) {
-    return 1;
+    return DATABASE_MODE_MY_CAMPAIGN;
   }
 
   const mode = Number.parseInt(parts[1], 10);
@@ -59,7 +61,7 @@ function normalizeApiKeyMode(apiKey: string): number {
     return mode;
   }
 
-  return 1;
+  return DATABASE_MODE_MY_CAMPAIGN;
 }
 
 function buildQueryString(params: VanParams): string {
@@ -100,12 +102,14 @@ export class VanApiClient implements VanApiClientLike {
   maxRetries: number;
   retryBaseDelayMs: number;
   dryRun: boolean;
+  bearerToken?: string;
 
   constructor(options: VanApiClientOptions | string = {}, appName?: string) {
     const normalizedOptions: VanApiClientOptions = typeof options === 'string'
       ? { apiKey: options, appName }
       : options;
 
+    this.bearerToken = normalizedOptions.bearerToken;
     this.apiKey = withDefaultDatabaseMode(normalizedOptions.apiKey ?? process.env.VAN_API_KEY ?? '');
     this.appName = normalizedOptions.appName ?? process.env.VAN_APP_NAME ?? 'default_user';
     this.baseURL = normalizedOptions.baseURL ?? DEFAULT_BASE_URL;
@@ -114,17 +118,20 @@ export class VanApiClient implements VanApiClientLike {
     this.retryBaseDelayMs = normalizedOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
     this.dryRun = normalizedOptions.dryRun ?? false;
 
-    if (!this.apiKey) {
+    if (!this.bearerToken && !this.apiKey) {
       throw new Error('VAN_API_KEY environment variable or apiKey option is required');
     }
 
-    this.databaseMode = normalizeApiKeyMode(this.apiKey);
+    this.databaseMode = this.bearerToken ? DATABASE_MODE_MY_CAMPAIGN : normalizeApiKeyMode(this.apiKey);
   }
 
   private async request<T>(method: string, endpoint: string, params?: VanParams, body?: VanPayload): Promise<T> {
     const url = `${this.baseURL}${endpoint}${params ? buildQueryString(params) : ''}`;
+    const authHeader = this.bearerToken
+      ? `Bearer ${this.bearerToken}`
+      : basicAuthHeader(this.appName, this.apiKey);
     const headers: Record<string, string> = {
-      'Authorization': basicAuthHeader(this.appName, this.apiKey),
+      'Authorization': authHeader,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'User-Agent': `van-cli/${version}`,

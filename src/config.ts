@@ -8,6 +8,8 @@ export interface ProfileData {
   [key: string]: string | undefined;
 }
 
+export const CALLBACK_PORT = 7890;
+
 export interface ConfigData {
   [sectionName: string]: ProfileData;
 }

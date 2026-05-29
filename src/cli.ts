@@ -1,9 +1,21 @@
 import { Command, program } from 'commander';
 import chalk from 'chalk';
-import VanApiClient from './client';
 import { version } from '../package.json';
 import { VanApiError } from './errors';
 import { getProfile, checkConfigPermissions } from './config';
+import VanApiClient, { DEFAULT_LOGIN_URL } from './client';
+import {
+  getActiveAccount,
+  updateAccountTokens,
+  listAccounts,
+  accountKey,
+  isBearerTokenExpired,
+  bearerTokenExpiry,
+  formatAccountStatus,
+} from './credentials';
+import { runLogin } from './commands/login';
+import { runLogout } from './commands/logout';
+import { runSwitch } from './commands/switch';
 import createActivistCodes from './commands/activistCodes';
 import createApiKeyProfiles from './commands/apiKeyProfiles';
 import createBulkImport from './commands/bulkImport';
@@ -24,10 +36,6 @@ import createScores from './commands/scores';
 import createSignups from './commands/signups';
 import createSupporterGroups from './commands/supporterGroups';
 import createSurveyQuestions from './commands/surveyQuestions';
-
-const isCompletionMode = process.argv.includes('completion') || process.argv.includes('__complete');
-const isSchemaMode = process.argv.includes('schema');
-const isConfigMode = process.argv.includes('config');
 
 // Resolve API key from: --profile flag > VAN_PROFILE env > VAN_API_KEY env > config [default]
 // Deferred until getClient() so --profile flag is available after parsing.
@@ -60,17 +68,74 @@ function resolveProfile(): { apiKey: string; appName?: string } | null {
 // Create global client instance (deferred until after program parses global options)
 let client: VanApiClient | null = null;
 
-function getClient() {
+async function resolveBearerToken(): Promise<string | null> {
+  const account = getActiveAccount();
+  if (!account) return null;
+
+  if (!isBearerTokenExpired(account)) {
+    return account.vanBearerToken;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const res = await fetch(
+      `${DEFAULT_LOGIN_URL}/vanCli/api/v1/vanApi/refreshToken`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refreshToken: account.refreshToken,
+          userId: account.userId,
+          tenantUri: account.tenantUri,
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    if (!res.ok) {
+      // Refresh token rejected (expired or rotated away). User must log in again.
+      console.error(chalk.yellow('Session expired. Run "van auth login" to re-authenticate.'));
+      return null;
+    }
+
+    const data = (await res.json()) as { bearerToken: string; refreshToken: string };
+    updateAccountTokens(accountKey(account), {
+      vanBearerToken: data.bearerToken,
+      vanBearerTokenExpiry: bearerTokenExpiry(),
+      refreshToken: data.refreshToken,
+    });
+
+    return data.bearerToken;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getClient() {
   if (!client) {
     const globalOpts = program.opts();
+
+    // Bearer auth takes priority when van login has been used.
+    const bearerToken = await resolveBearerToken();
+    if (bearerToken) {
+      client = new VanApiClient({
+        bearerToken,
+        dryRun: globalOpts.dryRun ?? false,
+      });
+      return client;
+    }
+
+    // Fall back to Basic auth with API key.
     const resolved = resolveProfile();
     if (!resolved) {
-      console.error(chalk.red('Error: No API key found. Provide one via:'));
-      console.error(chalk.yellow('  --profile <name>     Use a named profile from ./.van/config or ~/.van/config'));
-      console.error(chalk.yellow('  VAN_PROFILE=<name>   Environment variable for profile'));
-      console.error(chalk.yellow('  VAN_API_KEY=<key>    Environment variable for API key'));
-      console.error(chalk.yellow('  ./.van/config        Project-local [default] section (if present)'));
-      console.error(chalk.yellow('  ~/.van/config        Home-directory [default] section'));
+      console.error(chalk.red('Error: No credentials found. Either:'));
+      console.error(chalk.yellow('  van auth login         Log in with your ActionID account'));
+      console.error(chalk.yellow('  --profile <name>       Use a named API key profile'));
+      console.error(chalk.yellow('  VAN_API_KEY=<key>      Environment variable for API key'));
+      console.error(chalk.yellow('  ~/.van/config          Add api_key under [default]'));
       process.exit(1);
     }
 
@@ -465,15 +530,90 @@ function extractCommandSchema(cmd: Command) {
 
 // --- Set up the main program ---
 
+const loginStatus = (() => {
+  const account = getActiveAccount();
+  if (!account) return '';
+  return chalk.green(`Logged in as: ${formatAccountStatus(account)}`);
+})();
+
 program
   .name('van')
-  .description('NGP VAN API CLI tool.\n\nSupports --json, --dry-run, --fields, and --profile for agent-friendly usage.\n\nAPI docs: https://docs.ngpvan.com (append .md for agent-consumable format, e.g. https://docs.ngpvan.com/reference/people.md)')
+  .description(
+    'NGP VAN API CLI tool.' +
+    (loginStatus ? `\n${loginStatus}` : '') +
+    '\n\nSupports --json, --dry-run, --fields, and --profile for agent-friendly usage.' +
+    '\n\nAPI docs: https://docs.ngpvan.com (append .md for agent-consumable format, e.g. https://docs.ngpvan.com/reference/people.md)'
+  )
   .version(version)
   .option('-p, --pretty', 'Pretty-print JSON output')
   .option('--json <payload>', 'Raw JSON object to merge with CLI options (CLI flags take precedence)')
   .option('--dry-run', 'Print the HTTP request that would be made without executing it')
   .option('--fields <keys>', 'Comma-separated list of fields to include in the output')
   .option('--profile <name>', 'Use a named profile from ./.van/config or ~/.van/config (overrides VAN_PROFILE env)');
+
+// --- Auth commands ---
+
+const authCmd = program
+  .command('auth')
+  .description('Manage authentication accounts\n                        login [--committee --name] | logout [--account] | switch [--account] | status');
+
+authCmd
+  .command('login')
+  .description('Log in with your ActionID account via browser')
+  .option('--name <name>', 'Alias for this account')
+  .option('--committee <name>', 'Committee name to select (partial match, skips interactive prompt)')
+  .action(async (options) => {
+    try {
+      await runLogin(options.name, options.committee);
+    } catch (err: any) {
+      console.error(chalk.red(`Login failed: ${err.message}`));
+      process.exit(1);
+    }
+  });
+
+authCmd
+  .command('logout')
+  .description('Remove a stored account')
+  .option('--account <name>', 'Log out of a named account directly')
+  .action(async (opts) => {
+    try {
+      await runLogout(opts.account);
+    } catch (err: any) {
+      console.error(chalk.red(`Logout failed: ${err.message}`));
+      process.exit(1);
+    }
+  });
+
+authCmd
+  .command('switch')
+  .description('Switch between stored accounts (no browser required)')
+  .option('--account <name>', 'Switch directly to a named account')
+  .action(async (options) => {
+    try {
+      await runSwitch(options.account);
+    } catch (err: any) {
+      console.error(chalk.red(`Switch failed: ${err.message}`));
+      process.exit(1);
+    }
+  });
+
+authCmd
+  .command('status')
+  .description('Show login status for all stored accounts')
+  .action(() => {
+    const accounts = listAccounts();
+    if (accounts.length === 0) {
+      console.log(chalk.yellow('Not logged in. Run "van auth login" to authenticate.'));
+      return;
+    }
+    console.log('\nVAN accounts:\n');
+    for (const { account, isActive } of accounts) {
+      const check = isActive ? chalk.green('✓') : chalk.gray('-');
+      const nameLabel = account.name ? chalk.cyan(` [${account.name}]`) : '';
+      console.log(`  ${check} ${account.userName} / ${account.committeeName}${nameLabel}`);
+    }
+    console.log();
+  });
 
 const internalCompleteCmd = new Command('__complete');
 internalCompleteCmd
@@ -579,7 +719,7 @@ peopleCmd
   .action(async (vanId, options) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const api = createPeople(getClient());
+      const api = createPeople(await getClient());
       const person = await api.get(vanId, options.expand ? { $expand: options.expand } : {});
       outputResult(person, program.opts());
     } catch (error) {
@@ -597,7 +737,7 @@ peopleCmd
       const payload = parseJsonPayload(options);
       const globalOpts = program.opts();
       const merged = globalOpts.json ? { ...parseGlobalJsonPayload(globalOpts), ...payload } : payload;
-      const api = createPeople(getClient());
+      const api = createPeople(await getClient());
       const result = await api.update(vanId, merged);
       outputResult(result, globalOpts);
     } catch (error) {
@@ -611,7 +751,7 @@ peopleCmd
   .action(async (vanId) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const api = createPeople(getClient());
+      const api = createPeople(await getClient());
       const result = await api.delete(vanId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -621,6 +761,7 @@ peopleCmd
 
 peopleCmd
   .command('list')
+  .alias('find')
   .description('List people by criteria')
   .option('-f, --firstName <name>', 'First name')
   .option('-l, --lastName <name>', 'Last name')
@@ -671,7 +812,7 @@ peopleCmd
       if (merged.orderby) criteria.$orderby = merged.orderby;
       if (merged.expand) criteria.$expand = merged.expand;
 
-      const api = createPeople(getClient());
+      const api = createPeople(await getClient());
       const results = await api.list(criteria);
       outputResult(results, globalOpts);
     } catch (error) {
@@ -692,7 +833,7 @@ peopleCmd
 
       if (options.expand) criteria.$expand = options.expand;
 
-      const api = createPeople(getClient());
+      const api = createPeople(await getClient());
       const results = await api.quickSearch(criteria);
       outputResult(results, program.opts());
     } catch (error) {
@@ -720,7 +861,7 @@ peopleCmd
       if (merged.email) data.email = merged.email;
       if (merged.phone) data.phone = merged.phone;
 
-      const api = createPeople(getClient());
+      const api = createPeople(await getClient());
       const result = await api.findOrCreate(data);
       outputResult(result, globalOpts);
     } catch (error) {
@@ -748,7 +889,7 @@ peopleCmd
       if (merged.email) data.email = merged.email;
       if (merged.phone) data.phone = merged.phone;
 
-      const api = createPeople(getClient());
+      const api = createPeople(await getClient());
       const result = await api.create(data);
       outputResult(result, globalOpts);
     } catch (error) {
@@ -790,7 +931,7 @@ targetedEmailsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createTargetedEmails(getClient());
+      const api = createTargetedEmails(await getClient());
       outputResult(await api.list(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -803,7 +944,7 @@ targetedEmailsCmd
   .action(async (foreignMessageId) => {
     try {
       validateNonemptyString(foreignMessageId, 'foreignMessageId');
-      const api = createTargetedEmails(getClient());
+      const api = createTargetedEmails(await getClient());
       outputResult(await api.get(foreignMessageId), program.opts());
     } catch (error) {
       handleError(error);
@@ -824,7 +965,7 @@ activistCodesCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createActivistCodes(getClient());
+      const api = createActivistCodes(await getClient());
       const codes = await api.list(options);
       outputResult(codes, program.opts());
     } catch (error) {
@@ -838,7 +979,7 @@ activistCodesCmd
   .action(async (activistCodeId) => {
     try {
       validatePositiveInt(activistCodeId, 'activistCodeId');
-      const api = createActivistCodes(getClient());
+      const api = createActivistCodes(await getClient());
       const code = await api.get(activistCodeId);
       outputResult(code, program.opts());
     } catch (error) {
@@ -859,7 +1000,7 @@ surveyQuestionsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createSurveyQuestions(getClient());
+      const api = createSurveyQuestions(await getClient());
       const questions = await api.list(options);
       outputResult(questions, program.opts());
     } catch (error) {
@@ -873,7 +1014,7 @@ surveyQuestionsCmd
   .action(async (surveyQuestionId) => {
     try {
       validatePositiveInt(surveyQuestionId, 'surveyQuestionId');
-      const api = createSurveyQuestions(getClient());
+      const api = createSurveyQuestions(await getClient());
       const question = await api.get(surveyQuestionId);
       outputResult(question, program.opts());
     } catch (error) {
@@ -905,7 +1046,7 @@ eventsCmd
       if (options.startDate) listOptions.startDate = validateDate(options.startDate, 'startDate');
       if (options.endDate) listOptions.endDate = validateDate(options.endDate, 'endDate');
 
-      const api = createEvents(getClient());
+      const api = createEvents(await getClient());
       const events = await api.list(listOptions);
       outputResult(events, program.opts());
     } catch (error) {
@@ -920,7 +1061,7 @@ eventsCmd
   .action(async (eventId, options) => {
     try {
       validatePositiveInt(eventId, 'eventId');
-      const api = createEvents(getClient());
+      const api = createEvents(await getClient());
       const event = await api.get(eventId, options.expand ? { $expand: options.expand } : {});
       outputResult(event, program.opts());
     } catch (error) {
@@ -955,7 +1096,7 @@ eventsCmd
         shiftEndTime: merged.shiftEndTime,
       };
       if (merged.shortName) data.shortName = merged.shortName;
-      const api = createEvents(getClient());
+      const api = createEvents(await getClient());
       const event = await api.create(data);
       outputResult(event, globalOpts);
     } catch (error) {
@@ -990,7 +1131,7 @@ eventsCmd
       if (merged.roleId !== undefined) data.roleId = merged.roleId;
       if (merged.shiftStartTime !== undefined) data.shiftStartTime = merged.shiftStartTime;
       if (merged.shiftEndTime !== undefined) data.shiftEndTime = merged.shiftEndTime;
-      const api = createEvents(getClient());
+      const api = createEvents(await getClient());
       const result = await api.update(eventId, data);
       outputResult(result, globalOpts);
     } catch (error) {
@@ -1004,7 +1145,7 @@ eventsCmd
   .action(async (eventId) => {
     try {
       validatePositiveInt(eventId, 'eventId');
-      const api = createEvents(getClient());
+      const api = createEvents(await getClient());
       const result = await api.delete(eventId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1046,7 +1187,7 @@ savedListsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createSavedLists(getClient());
+      const api = createSavedLists(await getClient());
       const lists = await api.list(options);
       outputResult(lists, program.opts());
     } catch (error) {
@@ -1061,7 +1202,7 @@ savedListsCmd
   .action(async (savedListId, options) => {
     try {
       validatePositiveInt(savedListId, 'savedListId');
-      const api = createSavedLists(getClient());
+      const api = createSavedLists(await getClient());
       const list = await api.get(savedListId, options.expand ? { $expand: options.expand } : {});
       outputResult(list, program.opts());
     } catch (error) {
@@ -1091,7 +1232,7 @@ exportJobsCmd
         webhookUrl: validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl'),
       };
 
-      const api = createExportJobs(getClient());
+      const api = createExportJobs(await getClient());
       const job = await api.create(data);
       outputResult(job, globalOpts);
     } catch (error) {
@@ -1115,7 +1256,7 @@ canvassResponsesCmd
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const api = createCanvassResponses(getClient());
+      const api = createCanvassResponses(await getClient());
       const response = await api.create({
         vanId: merged.vanId,
         resultCodeId: merged.resultCodeId,
@@ -1136,7 +1277,7 @@ canvassResponsesCmd
   .action(async (options) => {
     try {
       validatePositiveInt(options.vanId, 'vanId');
-      const api = createCanvassResponses(getClient());
+      const api = createCanvassResponses(await getClient());
       const results = await api.list(options);
       outputResult(results, program.opts());
     } catch (error) {
@@ -1149,7 +1290,7 @@ canvassResponsesCmd
   .description('List valid canvass response input types')
   .action(async () => {
     try {
-      const api = createCanvassResponses(getClient());
+      const api = createCanvassResponses(await getClient());
       outputResult(await api.inputTypes(), program.opts());
     } catch (error) {
       handleError(error);
@@ -1161,7 +1302,7 @@ canvassResponsesCmd
   .description('List valid canvass response result codes')
   .action(async () => {
     try {
-      const api = createCanvassResponses(getClient());
+      const api = createCanvassResponses(await getClient());
       outputResult(await api.resultCodes(), program.opts());
     } catch (error) {
       handleError(error);
@@ -1173,7 +1314,7 @@ canvassResponsesCmd
   .description('List valid canvass response contact types')
   .action(async () => {
     try {
-      const api = createCanvassResponses(getClient());
+      const api = createCanvassResponses(await getClient());
       outputResult(await api.contactTypes(), program.opts());
     } catch (error) {
       handleError(error);
@@ -1203,7 +1344,7 @@ notesCmd
 
       if (merged.category) data.category = merged.category;
 
-      const api = createNotes(getClient());
+      const api = createNotes(await getClient());
       const note = await api.create(data);
       outputResult(note, globalOpts);
     } catch (error) {
@@ -1219,7 +1360,7 @@ notesCmd
     try {
       validatePositiveInt(noteId, 'noteId');
       const payload = parseJsonPayload(options);
-      const api = createNotes(getClient());
+      const api = createNotes(await getClient());
       const result = await api.update(noteId, payload);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1233,7 +1374,7 @@ notesCmd
   .action(async (noteId) => {
     try {
       validatePositiveInt(noteId, 'noteId');
-      const api = createNotes(getClient());
+      const api = createNotes(await getClient());
       const result = await api.delete(noteId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1255,7 +1396,7 @@ contributionsCmd
   .action(async (vanId, options) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const api = createContributions(getClient());
+      const api = createContributions(await getClient());
       outputResult(await api.list(vanId, options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1268,7 +1409,7 @@ contributionsCmd
   .action(async (contributionId) => {
     try {
       validatePositiveInt(contributionId, 'contributionId');
-      const api = createContributions(getClient());
+      const api = createContributions(await getClient());
       outputResult(await api.get(contributionId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1289,7 +1430,7 @@ contributionsCmd
       validateDate(options.dateReceived, 'dateReceived');
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const api = createContributions(getClient());
+      const api = createContributions(await getClient());
       outputResult(await api.create(merged), globalOpts);
     } catch (error) {
       handleError(error);
@@ -1317,7 +1458,7 @@ contributionsCmd
       if (merged.designationId !== undefined) data.designationId = merged.designationId;
       if (merged.status !== undefined) data.status = merged.status;
       if (merged.paymentType !== undefined) data.paymentType = merged.paymentType;
-      const api = createContributions(getClient());
+      const api = createContributions(await getClient());
       outputResult(await api.update(contributionId, data), globalOpts);
     } catch (error) {
       handleError(error);
@@ -1337,7 +1478,7 @@ designationsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createDesignations(getClient());
+      const api = createDesignations(await getClient());
       outputResult(await api.list(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1351,7 +1492,7 @@ designationsCmd
   .action(async (designationId, options) => {
     try {
       validatePositiveInt(designationId, 'designationId');
-      const api = createDesignations(getClient());
+      const api = createDesignations(await getClient());
       outputResult(await api.get(designationId, options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1396,7 +1537,7 @@ signupsCmd
         console.error(chalk.red('Error: At least one of --eventId or --vanId is required.'));
         process.exit(1);
       }
-      const api = createSignups(getClient());
+      const api = createSignups(await getClient());
       const signups = await api.list(options);
       outputResult(signups, program.opts());
     } catch (error) {
@@ -1410,7 +1551,7 @@ signupsCmd
   .action(async (eventSignupId) => {
     try {
       validatePositiveInt(eventSignupId, 'eventSignupId');
-      const api = createSignups(getClient());
+      const api = createSignups(await getClient());
       outputResult(await api.get(eventSignupId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1439,7 +1580,7 @@ signupsCmd
         locationId: merged.locationId,
       };
 
-      const api = createSignups(getClient());
+      const api = createSignups(await getClient());
       const signup = await api.create(data);
       outputResult(signup, globalOpts);
     } catch (error) {
@@ -1464,7 +1605,7 @@ signupsCmd
       if (merged.roleId !== undefined) data.roleId = merged.roleId;
       if (merged.statusId !== undefined) data.statusId = merged.statusId;
       if (merged.locationId !== undefined) data.locationId = merged.locationId;
-      const api = createSignups(getClient());
+      const api = createSignups(await getClient());
       outputResult(await api.update(signupId, data), globalOpts);
     } catch (error) {
       handleError(error);
@@ -1477,7 +1618,7 @@ signupsCmd
   .action(async (signupId) => {
     try {
       validatePositiveInt(signupId, 'signupId');
-      const api = createSignups(getClient());
+      const api = createSignups(await getClient());
       const result = await api.delete(signupId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1498,7 +1639,7 @@ scoresCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createScores(getClient());
+      const api = createScores(await getClient());
       const scores = await api.list(options);
       outputResult(scores, program.opts());
     } catch (error) {
@@ -1514,7 +1655,7 @@ scoresCmd
   .requiredOption('--value <value>', 'Score value', parseFloat)
   .action(async (options) => {
     try {
-      const api = createScores(getClient());
+      const api = createScores(await getClient());
       const result = await api.apply(options.vanId, options.scoreId, options.value);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1536,7 +1677,7 @@ customFieldsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createCustomFields(getClient());
+      const api = createCustomFields(await getClient());
       const fields = await api.list(options);
       outputResult(fields, program.opts());
     } catch (error) {
@@ -1558,7 +1699,7 @@ locationsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createLocations(getClient());
+      const api = createLocations(await getClient());
       const locations = await api.list(options);
       outputResult(locations, program.opts());
     } catch (error) {
@@ -1572,7 +1713,7 @@ locationsCmd
   .action(async (locationId) => {
     try {
       validatePositiveInt(locationId, 'locationId');
-      const api = createLocations(getClient());
+      const api = createLocations(await getClient());
       outputResult(await api.get(locationId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1592,7 +1733,7 @@ locationsCmd
   .option('--countryCode <country>', 'Country Code')
   .action(async (options) => {
     try {
-      const api = createLocations(getClient());
+      const api = createLocations(await getClient());
       outputResult(await api.create(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1612,7 +1753,7 @@ locationsCmd
   .option('--countryCode <country>', 'Country Code')
   .action(async (options) => {
     try {
-      const api = createLocations(getClient());
+      const api = createLocations(await getClient());
       outputResult(await api.findOrCreate(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1625,7 +1766,7 @@ locationsCmd
   .action(async (locationId) => {
     try {
       validatePositiveInt(locationId, 'locationId');
-      const api = createLocations(getClient());
+      const api = createLocations(await getClient());
       const result = await api.delete(locationId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1647,7 +1788,7 @@ bulkImportCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createBulkImport(getClient());
+      const api = createBulkImport(await getClient());
       const jobs = await api.list(options);
       outputResult(jobs, program.opts());
     } catch (error) {
@@ -1669,7 +1810,7 @@ changedEntityExportCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createChangedEntityExportJobs(getClient());
+      const api = createChangedEntityExportJobs(await getClient());
       const jobs = await api.list(options);
       outputResult(jobs, program.opts());
     } catch (error) {
@@ -1694,7 +1835,7 @@ changedEntityExportCmd
       if (merged.dateChangedTo) data.dateChangedTo = validateDate(merged.dateChangedTo as string, 'dateChangedTo');
       if (merged.webhookUrl) data.webhookUrl = validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl');
 
-      const api = createChangedEntityExportJobs(getClient());
+      const api = createChangedEntityExportJobs(await getClient());
       const job = await api.create(data);
       outputResult(job, globalOpts);
     } catch (error) {
@@ -1715,7 +1856,7 @@ eventTypesCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createEventTypes(getClient());
+      const api = createEventTypes(await getClient());
       const types = await api.list(options);
       outputResult(types, program.opts());
     } catch (error) {
@@ -1729,7 +1870,7 @@ eventTypesCmd
   .action(async (eventTypeId) => {
     try {
       validatePositiveInt(eventTypeId, 'eventTypeId');
-      const api = createEventTypes(getClient());
+      const api = createEventTypes(await getClient());
       outputResult(await api.get(eventTypeId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1749,7 +1890,7 @@ supporterGroupsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createSupporterGroups(getClient());
+      const api = createSupporterGroups(await getClient());
       const groups = await api.list(options);
       outputResult(groups, program.opts());
     } catch (error) {
@@ -1763,7 +1904,7 @@ supporterGroupsCmd
   .action(async (supporterGroupId) => {
     try {
       validatePositiveInt(supporterGroupId, 'supporterGroupId');
-      const api = createSupporterGroups(getClient());
+      const api = createSupporterGroups(await getClient());
       outputResult(await api.get(supporterGroupId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1785,7 +1926,7 @@ supporterGroupsCmd
 
       if (merged.description) data.description = merged.description;
 
-      const api = createSupporterGroups(getClient());
+      const api = createSupporterGroups(await getClient());
       const group = await api.create(data);
       outputResult(group, globalOpts);
     } catch (error) {
@@ -1799,7 +1940,7 @@ supporterGroupsCmd
   .action(async (supporterGroupId) => {
     try {
       validatePositiveInt(supporterGroupId, 'supporterGroupId');
-      const api = createSupporterGroups(getClient());
+      const api = createSupporterGroups(await getClient());
       const result = await api.delete(supporterGroupId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1814,7 +1955,7 @@ supporterGroupsCmd
     try {
       validatePositiveInt(supporterGroupId, 'supporterGroupId');
       validatePositiveInt(vanId, 'vanId');
-      const api = createSupporterGroups(getClient());
+      const api = createSupporterGroups(await getClient());
       const result = await api.addPerson(supporterGroupId, vanId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1830,7 +1971,7 @@ supporterGroupsCmd
     try {
       validatePositiveInt(supporterGroupId, 'supporterGroupId');
       validatePositiveInt(vanId, 'vanId');
-      const api = createSupporterGroups(getClient());
+      const api = createSupporterGroups(await getClient());
       const result = await api.removePerson(supporterGroupId, vanId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1849,7 +1990,7 @@ apiKeyProfilesCmd
   .description('Get API key profile details for the current API key')
   .action(async () => {
     try {
-      const api = createApiKeyProfiles(getClient());
+      const api = createApiKeyProfiles(await getClient());
       const profileDetails = await api.get();
       outputResult(profileDetails, program.opts());
     } catch (error) {
@@ -1860,7 +2001,7 @@ apiKeyProfilesCmd
 // --- Config ---
 
 import {
-  loadConfig, saveConfig, getConfigPath, listProfiles,
+  loadConfig, saveConfig, getConfigPath,
   addProfile, removeProfile, setDefaultProfile, maskApiKey,
 } from './config';
 
@@ -1958,7 +2099,7 @@ apiCmd
   .action(async (endpoint) => {
     try {
       const { path, params } = parseEndpoint(endpoint);
-      const result = await getClient().get(path, params);
+      const result = await (await getClient()).get(path, params);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -1973,7 +2114,7 @@ apiCmd
     try {
       const globalOpts = program.opts();
       const body = mergeJsonOption(options, globalOpts);
-      const result = await getClient().post(normalizeEndpoint(endpoint), body);
+      const result = await (await getClient()).post(normalizeEndpoint(endpoint), body);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -1988,7 +2129,7 @@ apiCmd
     try {
       const globalOpts = program.opts();
       const body = mergeJsonOption(options, globalOpts);
-      const result = await getClient().put(normalizeEndpoint(endpoint), body);
+      const result = await (await getClient()).put(normalizeEndpoint(endpoint), body);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -2000,7 +2141,7 @@ apiCmd
   .description('DELETE any VAN API endpoint')
   .action(async (endpoint) => {
     try {
-      const result = await getClient().delete(normalizeEndpoint(endpoint));
+      const result = await (await getClient()).delete(normalizeEndpoint(endpoint));
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
