@@ -2,7 +2,7 @@ import { version } from '../package.json';
 import { VanApiError } from './errors';
 import type { VanApiClientLike, VanApiClientOptions, VanParams, VanPayload } from './types';
 
-export const DEFAULT_LOGIN_URL = 'https://api.securevan.com';
+export const DEFAULT_LOGIN_URL = process.env.DEFAULT_LOGIN_URL ?? 'https://api.securevan.com';
 const DEFAULT_BASE_URL = 'https://api.securevan.com/v4';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 3;
