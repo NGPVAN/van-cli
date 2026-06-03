@@ -3,16 +3,13 @@ import chalk from 'chalk';
 import { version } from '../package.json';
 import { VanApiError } from './errors';
 import { getProfile, checkConfigPermissions } from './config';
-import VanApiClient, { DEFAULT_LOGIN_URL } from './client';
+import VanApiClient from './client';
 import {
-  getActiveAccount,
-  updateAccountTokens,
   listAccounts,
-  accountKey,
-  isBearerTokenExpired,
-  bearerTokenExpiry,
   formatAccountStatus,
+  getActiveAccount,
 } from './credentials';
+import { getBearerToken, AuthError } from './tokenManager';
 import { runLogin } from './commands/login';
 import { runLogout } from './commands/logout';
 import { runSwitch } from './commands/switch';
@@ -68,64 +65,21 @@ function resolveProfile(): { apiKey: string; appName?: string } | null {
 // Create global client instance (deferred until after program parses global options)
 let client: VanApiClient | null = null;
 
-async function resolveBearerToken(): Promise<string | null> {
-  const account = getActiveAccount();
-  if (!account) return null;
-
-  if (!isBearerTokenExpired(account)) {
-    return account.vanBearerToken;
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
-  try {
-    const res = await fetch(
-      `${DEFAULT_LOGIN_URL}/vanCli/api/v1/vanApi/refreshToken`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          refreshToken: account.refreshToken,
-          userId: account.userId,
-          tenantUri: account.tenantUri,
-        }),
-        signal: controller.signal,
-      }
-    );
-
-    if (!res.ok) {
-      // Refresh token rejected (expired or rotated away). User must log in again.
-      console.error(chalk.yellow('Session expired. Run "van auth login" to re-authenticate.'));
-      return null;
-    }
-
-    const data = (await res.json()) as { bearerToken: string; refreshToken: string };
-    updateAccountTokens(accountKey(account), {
-      vanBearerToken: data.bearerToken,
-      vanBearerTokenExpiry: bearerTokenExpiry(),
-      refreshToken: data.refreshToken,
-    });
-
-    return data.bearerToken;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function getClient() {
   if (!client) {
     const globalOpts = program.opts();
 
     // Bearer auth takes priority when van login has been used.
-    const bearerToken = await resolveBearerToken();
-    if (bearerToken) {
+    try {
+      const bearerToken = await getBearerToken();
       client = new VanApiClient({
         bearerToken,
         dryRun: globalOpts.dryRun ?? false,
       });
       return client;
+    } catch (err) {
+      if (!(err instanceof AuthError)) throw err;
+      // No bearer credentials — fall through to API key auth.
     }
 
     // Fall back to Basic auth with API key.

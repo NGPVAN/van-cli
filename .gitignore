@@ -1,7 +1,9 @@
 node_modules
 dist
+dist-mcp
 coverage
 .npm
 .env
 .env.*
 .van
+.mcp.json

@@ -37,8 +37,10 @@
     "node": ">=24.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "chalk": "^4.1.2",
-    "commander": "^11.1.0"
+    "commander": "^11.1.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
