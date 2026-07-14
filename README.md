@@ -155,7 +155,7 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 - `contributions`: `list`, `get`, `create`, `update`
 - `designations`: `list`, `get`
 - `signups`: `list`, `get`, `create`, `update`, `delete`
-- `notes`: `list`, `get`, `create`, `update`, `delete`, `getByPerson`, `getAll`
+- `notes`: `list`, `get`, `create`, `update`, `delete`, `categories`
 - `scores`: `list`, `get`, `getAll`, `apply`, `getByPerson`, `update`, `remove`
 - `customFields`: `list`, `get`, `getAll`, `setValue`, `getByPerson`, `updateValue`, `removeValue`
 - `codes`: `list`, `listResultCodes`, `getResultCode`, `listContactTypes`, `getContactType`, `listInputTypes`, `getInputType`, `listSupporterGroups`, `getSupporterGroup`, `getAllResultCodes`, `getAllContactTypes`
@@ -180,7 +180,7 @@ The CLI currently implements a subset of SDK methods:
 - `saved-lists`: `list`, `get`
 - `export-jobs`: `create`
 - `canvass-responses`: `create`, `list`, `input-types`, `result-codes`, `contact-types`
-- `notes`: `create`, `update`, `delete`
+- `notes`: `list`, `get`, `create`, `update`, `delete`, `categories`
 - `contributions`: `list`, `get`, `create`, `update`
 - `designations`: `expand-fields`, `list`, `get`
 - `signups`: `list`, `create`, `update`, `delete`
