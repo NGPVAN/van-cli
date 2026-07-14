@@ -1,3 +1,4 @@
+import chalk from 'chalk';
 import { version } from '../package.json';
 import { VanApiError } from './errors';
 import type { VanApiClientLike, VanApiClientOptions, VanParams, VanPayload } from './types';
@@ -100,6 +101,7 @@ export class VanApiClient implements VanApiClientLike {
   maxRetries: number;
   retryBaseDelayMs: number;
   dryRun: boolean;
+  debugMode: boolean;
 
   constructor(options: VanApiClientOptions | string = {}, appName?: string) {
     const normalizedOptions: VanApiClientOptions = typeof options === 'string'
@@ -113,6 +115,7 @@ export class VanApiClient implements VanApiClientLike {
     this.maxRetries = normalizedOptions.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryBaseDelayMs = normalizedOptions.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
     this.dryRun = normalizedOptions.dryRun ?? false;
+    this.debugMode = normalizedOptions.debugMode ?? process.env.VAN_CLI_DEBUG_MODE === 'true';
 
     if (!this.apiKey) {
       throw new Error('VAN_API_KEY environment variable or apiKey option is required');
@@ -133,6 +136,10 @@ export class VanApiClient implements VanApiClientLike {
     const init: Record<string, unknown> = { method, headers };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
+    }
+
+    if (this.debugMode) {
+      console.log(chalk.cyan(`${init.method} ${url}${init.body ? ('\n' + init.body) : ''}`));
     }
 
     let attempt = 0;

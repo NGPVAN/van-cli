@@ -95,13 +95,11 @@ describe('command modules broad coverage', () => {
     await signups.delete(12);
 
     const notes = createNotes(client);
-    await notes.list({ top: 10, skip: 1, vanId: 100 });
-    await notes.get(20);
-    await notes.create({ vanId: 100, text: 'hello', category: 'general' });
-    await notes.update(20, { text: 'updated' });
-    await notes.delete(20);
-    await notes.getByPerson(100, { top: 10, skip: 1 });
-    await notes.getAll({ vanId: 100 }, 1000);
+    await notes.list(100, { top: 10, skip: 1 });
+    await notes.get(100, 20);
+    await notes.create(100, { text: 'hello', noteCategoryId: 5 });
+    await notes.update(100, 20, { text: 'updated' });
+    await notes.delete(100, 20);
 
     const stories = createStories(client);
     await stories.list({ top: 10, skip: 1, vanId: 100 });
