@@ -35,7 +35,7 @@ describe('command module wiring tests', () => {
     await createExportJobs(client).create({ savedListId: 11, webhookUrl: 'https://hooks.example.com/van' });
     await createContributions(client).get(9);
     await createSignups(client).create({ eventId: 4, vanId: 5, eventShiftId: 3, roleId: 3, statusId: 5, locationId: 3 });
-    await createNotes(client).create({ vanId: 4, text: 'note' });
+    await createNotes(client).create(4, { text: 'note' });
     await createScores(client).apply(3, 2, 99);
     await createTargets(client).list({ targetType: 'Voter' });
     await createStories(client).create({ vanId: 1, text: 'story' });

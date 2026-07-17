@@ -10,99 +10,122 @@ import type { VanApiClientLike } from '../types';
 const create = function(client: VanApiClientLike) {
   return {
     /**
-     * List notes
-     * @param {Object} options - Optional parameters
-     * @param {number} options.top - Number of results
-     * @param {number} options.skip - Number of results to skip
-     * @param {number} options.vanId - Person VAN ID filter
-     * @param {string} options.category - Note category filter
-     * @returns {Promise<Object>} List of notes
-     */
-    async list(options = {}) {
-      const params = {
-        $top: options.top || 50,
-        $skip: options.skip || 0
-      };
-      
-      if (options.vanId) params.vanId = options.vanId;
-      if (options.category) params.category = options.category;
-      
-      return client.get('/notes', params);
-    },
-    
-    /**
-     * Get a specific note by ID
-     * @param {number} noteId - The note ID
-     * @returns {Promise<Object>} Note object
-     */
-    async get(noteId) {
-      return client.get(`/notes/${noteId}`);
-    },
-    
-    /**
-     * Create a new note
-     * @param {Object} noteData - Note data
-     * @param {number} noteData.vanId - Person's VAN ID (required)
-     * @param {string} noteData.text - Note text (required)
-     * @param {string} noteData.category - Note category
-     * @param {boolean} noteData.isViewRestricted - Whether note is view restricted
-     * @returns {Promise<Object>} Created note object
-     */
-    async create(noteData) {
-      const requiredFields = ['vanId', 'text'];
-      for (const field of requiredFields) {
-        if (!noteData[field]) {
-          throw new Error(`Required field '${field}' is missing`);
-        }
-      }
-      
-      return client.post('/notes', noteData);
-    },
-    
-    /**
-     * Update a note
-     * @param {number} noteId - The note ID
-     * @param {Object} noteData - Updated note data
-     * @returns {Promise<Object>} Updated note object
-     */
-    async update(noteId, noteData) {
-      return client.put(`/notes/${noteId}`, noteData);
-    },
-    
-    /**
-     * Delete a note
-     * @param {number} noteId - The note ID
-     * @returns {Promise<Object>} Response
-     */
-    async delete(noteId) {
-      return client.delete(`/notes/${noteId}`);
-    },
-    
-    /**
-     * Get notes for a specific person
-     * @param {number} vanId - Person's VAN ID
+     * List notes for a person
+     * @param {number} vanId - Person's VAN ID (required)
      * @param {Object} options - Optional parameters
      * @param {number} options.top - Number of results
      * @param {number} options.skip - Number of results to skip
      * @returns {Promise<Object>} List of notes for the person
      */
-    async getByPerson(vanId, options = {}) {
+    async list(vanId, options = {}) {
+      if (!vanId) {
+        throw new Error('Required field \'vanId\' is missing');
+      }
+
       const params = {
         $top: options.top || 50,
         $skip: options.skip || 0
       };
-      
+
       return client.get(`/people/${vanId}/notes`, params);
     },
-    
+
     /**
-     * Get all notes (automatically paginated)
-     * @param {Object} criteria - Filter criteria
-     * @param {number} maxResults - Maximum number of results
-     * @returns {Promise<Array>} Array of all notes
+     * Get a specific note by ID
+     * @param {number} vanId - Person's VAN ID (required)
+     * @param {number} noteId - The note ID (required)
+     * @returns {Promise<Object>} Note object
      */
-    async getAll(criteria = {}, maxResults = 10000) {
-      return client.getAllPaginated('/notes', criteria, maxResults);
+    async get(vanId, noteId) {
+      if (!vanId) {
+        throw new Error('Required field \'vanId\' is missing');
+      }
+      if (!noteId) {
+        throw new Error('Required field \'noteId\' is missing');
+      }
+
+      return client.get(`/people/${vanId}/notes/${noteId}`);
+    },
+
+    /**
+     * Create a new note for a person
+     * @param {number} vanId - Person's VAN ID (required)
+     * @param {Object} noteData - Note data
+     * @param {string} noteData.text - Note text (required)
+     * @param {number} noteData.noteCategoryId - Note category ID (optional)
+     * @returns {Promise<Object>} Created note object
+     */
+    async create(vanId, noteData = {}) {
+      if (!vanId) {
+        throw new Error('Required field \'vanId\' is missing');
+      }
+      if (!noteData.text) {
+        throw new Error('Required field \'text\' is missing');
+      }
+
+      const body = { text: noteData.text };
+      if (noteData.noteCategoryId !== undefined) {
+        body.category = { noteCategoryId: noteData.noteCategoryId };
+      }
+
+      await client.post(`/people/${vanId}/notes`, body);
+      return `Note created for VanID ${vanId}`;
+    },
+
+    /**
+     * Update a note for a person
+     * @param {number} vanId - Person's VAN ID (required)
+     * @param {number} noteId - The note ID (required)
+     * @param {Object} noteData - Updated note data
+     * @param {string} noteData.text - Note text (optional)
+     * @param {number} noteData.noteCategoryId - Note category ID (optional)
+     * @returns {Promise<Object>} Updated note object
+     */
+    async update(vanId, noteId, noteData = {}) {
+      if (!vanId) {
+        throw new Error('Required field \'vanId\' is missing');
+      }
+      if (!noteId) {
+        throw new Error('Required field \'noteId\' is missing');
+      }
+      if (noteData.text === undefined && noteData.noteCategoryId === undefined) {
+        throw new Error('At least one of \'text\' or \'noteCategoryId\' is required');
+      }
+
+      const body = {};
+      if (noteData.text !== undefined) body.text = noteData.text;
+      if (noteData.noteCategoryId !== undefined) {
+        body.category = { noteCategoryId: noteData.noteCategoryId };
+      }
+
+      const response = await client.put(`/people/${vanId}/notes/${noteId}`, body);
+      return (response !== null) ? response : this.get(vanId, noteId);
+    },
+
+    /**
+     * Delete a note for a person
+     * @param {number} vanId - Person's VAN ID (required)
+     * @param {number} noteId - The note ID (required)
+     * @returns {Promise<Object>} Response
+     */
+    async delete(vanId, noteId) {
+      if (!vanId) {
+        throw new Error('Required field \'vanId\' is missing');
+      }
+      if (!noteId) {
+        throw new Error('Required field \'noteId\' is missing');
+      }
+
+      try {
+        await client.delete(`/people/${vanId}/notes/${noteId}`);
+        return `Note ${noteId} deleted`;
+      } catch (error) {
+        throw new Error(`Failed to delete noteId ${noteId}`, { cause: error });
+      }
+    },
+
+    async categories() {
+      return client.get('/notes/categories');
     }
   };
 };

@@ -1328,24 +1328,54 @@ const notesCmd = program
   .description('Manage notes');
 
 notesCmd
+  .command('list')
+  .description('List notes for a person')
+  .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
+  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
+  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .action(async (options) => {
+    try {
+      validatePositiveInt(options.vanId, 'vanId');
+      const api = createNotes(getClient());
+      const notes = await api.list(options.vanId, options);
+      outputResult(notes, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+notesCmd
+  .command('get <noteId>')
+  .description('Get a note by ID')
+  .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
+  .action(async (noteId, options) => {
+    try {
+      validatePositiveInt(options.vanId, 'vanId');
+      validatePositiveInt(noteId, 'noteId');
+      const api = createNotes(getClient());
+      const note = await api.get(options.vanId, noteId);
+      outputResult(note, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+notesCmd
   .command('create')
   .description('Create a note')
   .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
   .requiredOption('-t, --text <text>', 'Note text')
-  .option('-c, --category <category>', 'Note category')
+  .option('-n, --noteCategoryId <id>', 'Note category ID', parseInt)
   .action(async (options) => {
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data: Record<string, unknown> = {
-        vanId: merged.vanId,
-        text: merged.text
-      };
-
-      if (merged.category) data.category = merged.category;
 
       const api = createNotes(await getClient());
-      const note = await api.create(data);
+      const note = await api.create(merged.vanId, {
+        text: merged.text,
+        noteCategoryId: merged.noteCategoryId
+      });
       outputResult(note, globalOpts);
     } catch (error) {
       handleError(error);
@@ -1355,13 +1385,18 @@ notesCmd
 notesCmd
   .command('update <noteId>')
   .description('Update a note by ID')
-  .requiredOption('-d, --data <json>', 'JSON payload for note update')
+  .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
+  .option('-t, --text <text>', 'Note text')
+  .option('-n, --noteCategoryId <id>', 'Note category ID', parseInt)
   .action(async (noteId, options) => {
     try {
+      validatePositiveInt(options.vanId, 'vanId');
       validatePositiveInt(noteId, 'noteId');
-      const payload = parseJsonPayload(options);
       const api = createNotes(await getClient());
-      const result = await api.update(noteId, payload);
+      const result = await api.update(options.vanId, noteId, {
+        text: options.text,
+        noteCategoryId: options.noteCategoryId
+      });
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -1371,12 +1406,26 @@ notesCmd
 notesCmd
   .command('delete <noteId>')
   .description('Delete a note by ID')
-  .action(async (noteId) => {
+  .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
+  .action(async (noteId, options) => {
     try {
+      validatePositiveInt(options.vanId, 'vanId');
       validatePositiveInt(noteId, 'noteId');
       const api = createNotes(await getClient());
-      const result = await api.delete(noteId);
+      const result = await api.delete(options.vanId, noteId);
       outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+notesCmd
+  .command('categories')
+  .description('List valid note categories')
+  .action(async () => {
+    try {
+      const api = createNotes(getClient());
+      outputResult(await api.categories(), program.opts());
     } catch (error) {
       handleError(error);
     }
