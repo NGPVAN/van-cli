@@ -9,7 +9,7 @@ export async function runSwitch(accountName?: string): Promise<void> {
       throw new Error(`No account found with name "${accountName}". Run "van auth status" to see stored accounts.`);
     }
     setActiveAccount(found.key);
-    console.log(`Switched to: ${found.account.userName} / ${found.account.committeeName}`);
+    console.log(`Default account set to: ${found.account.userName} / ${found.account.committeeName}`);
     return;
   }
 
@@ -21,13 +21,13 @@ export async function runSwitch(accountName?: string): Promise<void> {
 
   if (accounts.length === 1) {
     const { account } = accounts[0];
-    console.log(`Only one account stored: ${account.userName} / ${account.committeeName}`);
+    console.log(`Only one account stored, so it's already the default: ${account.userName} / ${account.committeeName}`);
     return;
   }
 
   console.log('\nStored accounts:\n');
   accounts.forEach(({ account, isActive }, i) => {
-    const marker = isActive ? ` ${chalk.green('✓')}` : '';
+    const marker = isActive ? ` ${chalk.green('✓')} (default)` : '';
     const nameLabel = account.name ? chalk.cyan(` [${account.name}]`) : '';
     console.log(`  ${i + 1}. ${account.userName} / ${account.committeeName}${nameLabel}${marker}`);
   });
@@ -45,10 +45,10 @@ export async function runSwitch(accountName?: string): Promise<void> {
   }
 
   if (selected.isActive) {
-    console.log(`\nAlready on: ${selected.account.userName} / ${selected.account.committeeName}`);
+    console.log(`\n${selected.account.userName} / ${selected.account.committeeName} is already the default account.`);
     return;
   }
 
   setActiveAccount(selected.key);
-  console.log(`\nSwitched to: ${selected.account.userName} / ${selected.account.committeeName}`);
+  console.log(`\nDefault account set to: ${selected.account.userName} / ${selected.account.committeeName}`);
 }

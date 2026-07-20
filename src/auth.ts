@@ -12,14 +12,35 @@ interface TokenResponse {
   token_type: string;
 }
 
+interface DeviceCodeResponse {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete?: string;
+  expires_in: number;
+  interval?: number;
+}
+
+interface DeviceTokenErrorResponse {
+  error: string;
+  error_description?: string;
+}
+
 const CALLBACK_PATH = '/callback';
 const LISTEN_HOST = '127.0.0.1';
 const LOCALHOST_BASE = 'http://localhost';
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const GRANT_TYPE_AUTH_CODE = 'authorization_code';
 const GRANT_TYPE_REFRESH_TOKEN = 'refresh_token';
+const GRANT_TYPE_DEVICE_CODE = 'urn:ietf:params:oauth:grant-type:device_code';
+const DEVICE_CODE_DEFAULT_POLL_INTERVAL_SECONDS = 5;
+const DEVICE_CODE_SLOW_DOWN_INCREMENT_MS = 5000;
 const LOGIN_SCOPE = 'openid profile email offline_access ngpvan.cli.bearer';
 const REDIRECT_URI = `http://${LISTEN_HOST}:${CALLBACK_PORT}${CALLBACK_PATH}`;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function escapeHtml(str: string): string {
   return str
@@ -180,6 +201,99 @@ export async function runPkceFlow(): Promise<PkceFlowResult> {
   const tokens = await exchangeCodeForTokens(
     code, codeVerifier, REDIRECT_URI, tokenEndpoint, clientId
   );
+
+  if (!tokens.refresh_token) {
+    throw new Error('Authentication failed. Please try again or contact support.');
+  }
+
+  return {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+  };
+}
+
+async function requestDeviceCode(domain: string, clientId: string, audience: string): Promise<DeviceCodeResponse> {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    scope: LOGIN_SCOPE,
+    audience,
+  });
+
+  const res = await fetch(`${domain}/oauth/device/code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Device code request failed (${res.status}): ${body}`);
+  }
+
+  return res.json() as Promise<DeviceCodeResponse>;
+}
+
+// Polls per RFC 8628 §3.5: keep retrying on authorization_pending, back off on slow_down,
+// and stop on any other error (expired_token, access_denied, or an unexpected response).
+async function pollForDeviceToken(
+  domain: string,
+  clientId: string,
+  device: DeviceCodeResponse
+): Promise<TokenResponse> {
+  const deadline = Date.now() + device.expires_in * 1000;
+  let intervalMs = (device.interval ?? DEVICE_CODE_DEFAULT_POLL_INTERVAL_SECONDS) * 1000;
+
+  while (Date.now() < deadline) {
+    await sleep(intervalMs);
+
+    const params = new URLSearchParams({
+      grant_type: GRANT_TYPE_DEVICE_CODE,
+      device_code: device.device_code,
+      client_id: clientId,
+    });
+
+    const res = await fetch(`${domain}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+
+    if (res.ok) {
+      return res.json() as Promise<TokenResponse>;
+    }
+
+    const body = (await res.json().catch(() => ({}))) as Partial<DeviceTokenErrorResponse>;
+
+    if (body.error === 'slow_down') {
+      intervalMs += DEVICE_CODE_SLOW_DOWN_INCREMENT_MS;
+      continue;
+    }
+    if (body.error === 'authorization_pending') {
+      continue;
+    }
+    if (body.error === 'access_denied') {
+      throw new Error('Login was denied.');
+    }
+    if (body.error === 'expired_token') {
+      break;
+    }
+
+    throw new Error(`Token exchange failed (${res.status}): ${body.error_description ?? body.error ?? 'unknown error'}`);
+  }
+
+  throw new Error('Login timed out. Please try again.');
+}
+
+// Device authorization flow (RFC 8628): no local server or browser redirect required, so
+// this works over SSH/in containers where a loopback redirect can't reach the user's browser.
+export async function runDeviceCodeFlow(): Promise<PkceFlowResult> {
+  const { domain, clientId, audience } = await fetchAuthConfig(DEFAULT_LOGIN_URL);
+  const device = await requestDeviceCode(domain, clientId, audience);
+
+  console.log(`\nTo log in, open:\n  ${device.verification_uri}\n\nAnd enter this code: ${device.user_code}\n`);
+  console.log('Waiting for login to complete...');
+
+  const tokens = await pollForDeviceToken(domain, clientId, device);
 
   if (!tokens.refresh_token) {
     throw new Error('Authentication failed. Please try again or contact support.');

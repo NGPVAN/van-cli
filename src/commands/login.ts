@@ -1,5 +1,5 @@
 import { DEFAULT_LOGIN_URL } from '../client';
-import { runPkceFlow } from '../auth';
+import { runPkceFlow, runDeviceCodeFlow } from '../auth';
 import { fetchVanToken, type VanUser, type VanTenant } from '../vanToken';
 import {
   addAccount,
@@ -61,18 +61,17 @@ async function selectUserAndCommittee(users: VanUser[], committee?: string): Pro
   }
 }
 
-export async function runLogin(name?: string, committee?: string): Promise<void> {
+export async function runLogin(name?: string, committee?: string, deviceCode?: boolean): Promise<void> {
   console.log('Logging in to VAN...');
 
-  const { accessToken, refreshToken } = await runPkceFlow();
+  const { accessToken, refreshToken } = deviceCode ? await runDeviceCodeFlow() : await runPkceFlow();
 
   const tokenData = await fetchVanToken(DEFAULT_LOGIN_URL, accessToken);
   const users = tokenData.users ?? [];
 
   const allCombos = users.flatMap(u => u.tenants.map(t => ({ u, t })));
   if (allCombos.length === 0) {
-    console.error('Your ActionID account is not linked to any VAN users or committees.');
-    process.exit(1);
+    throw new Error('Your ActionID account is not linked to any VAN users or committees.');
   }
 
   let selectedUser: VanUser;

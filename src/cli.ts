@@ -9,12 +9,15 @@ import { fetchVanToken } from './vanToken';
 import {
   getActiveAccount,
   getActiveAccountMetadata,
+  findAccountByName,
+  findAccountMetadataByName,
+  listAccountMetadata,
   updateAccountTokens,
-  listAccounts,
   accountKey,
   isBearerTokenExpired,
   bearerTokenExpiry,
   formatAccountStatus,
+  type Account,
 } from './credentials';
 import { runLogin } from './commands/login';
 import { runLogout } from './commands/logout';
@@ -40,6 +43,38 @@ import createSignups from './commands/signups';
 import createSupporterGroups from './commands/supporterGroups';
 import createSurveyQuestions from './commands/surveyQuestions';
 
+// Exit code taxonomy so scripts/agents can branch without parsing message text.
+const EXIT_API_ERROR = 1;
+const EXIT_AUTH_REQUIRED = 2;
+const EXIT_VALIDATION_ERROR = 3;
+
+// Node has an open upstream bug on Windows where process.exit() shortly after a fetch()
+// call resolves can crash with a libuv assertion (nodejs/node#56645; unresolved as of
+// Node 24). A brief delay lets the closing socket handle settle before the event loop
+// tears down. Only ever called from the top-level catch in main() below, once the error
+// has already been printed, so this is the single place that actually terminates the process.
+async function finalizeExit(code: number): Promise<never> {
+  await new Promise(resolve => setTimeout(resolve, 100));
+  process.exit(code);
+}
+
+// Thrown by emitError to unwind synchronously (so validation can't fall through to using
+// bad data) without calling process.exit() directly — see finalizeExit() for why.
+class CliExit extends Error {
+  constructor(public readonly code: number) {
+    super('CliExit');
+  }
+}
+
+// All command failures funnel through here so stderr is always a single JSON object,
+// matching the JSON stdout every command already produces via outputResult().
+function emitError(code: number, type: string, message: string, extra: Record<string, unknown> = {}): never {
+  const payload = { error: { type, message, ...extra } };
+  const opts = program.opts();
+  console.error(opts.pretty ? JSON.stringify(payload, null, 2) : JSON.stringify(payload));
+  throw new CliExit(code);
+}
+
 // Resolve API key from: --profile flag > VAN_PROFILE env > VAN_API_KEY env > config [default]
 // Deferred until getClient() so --profile flag is available after parsing.
 function resolveProfile(): { apiKey: string; appName?: string } | null {
@@ -49,9 +84,12 @@ function resolveProfile(): { apiKey: string; appName?: string } | null {
   if (profileName) {
     const profile = getProfile(profileName);
     if (!profile || !profile.api_key) {
-      console.error(chalk.red(`Error: Profile "${profileName}" not found or has no api_key in config.`));
-      console.error(chalk.yellow('Run "van config list" to see available profiles.'));
-      process.exit(1);
+      emitError(
+        EXIT_VALIDATION_ERROR,
+        'ProfileNotFound',
+        `Profile "${profileName}" not found or has no api_key in config.`,
+        { hint: 'Run "van config list" to see available profiles.' }
+      );
     }
     return { apiKey: profile.api_key, appName: profile.app_name };
   }
@@ -71,9 +109,48 @@ function resolveProfile(): { apiKey: string; appName?: string } | null {
 // Create global client instance (deferred until after program parses global options)
 let client: VanApiClient | null = null;
 
+// Resolves which stored OAuth account to use for this invocation. An explicit --use-account
+// flag or VAN_ACCOUNT env var always wins. Otherwise falls back to the persisted default
+// account — but only when that's unambiguous (a single stored account) or a human is
+// actually watching (a TTY). Without that guard, a script/agent running many commands
+// could silently keep acting on whatever a concurrent `van auth switch` last left default,
+// with no one there to notice it changed mid-task.
+async function resolveAccountForInvocation(options: { silent?: boolean } = {}): Promise<Account | null> {
+  const overrideName = program.opts().useAccount || process.env.VAN_ACCOUNT;
+
+  if (overrideName) {
+    const found = await findAccountByName(overrideName);
+    if (found) return found.account;
+    if (options.silent) return null;
+    emitError(EXIT_VALIDATION_ERROR, 'AccountNotFound', `No account found with name "${overrideName}".`, {
+      hint: 'Run "van auth status" to see stored accounts.',
+    });
+  }
+
+  const metas = listAccountMetadata();
+  if (metas.length === 0) return null;
+  if (metas.length === 1) return getActiveAccount();
+
+  if (!process.stdout.isTTY) {
+    if (options.silent) return null;
+    emitError(EXIT_VALIDATION_ERROR, 'AmbiguousAccount', 'Multiple accounts are stored and no account was specified.', {
+      hint: 'Pass --use-account <name> or set VAN_ACCOUNT.',
+      accounts: metas.map(m => m.name ?? m.key),
+    });
+  }
+
+  return getActiveAccount();
+}
+
 async function resolveBearerToken(): Promise<string | null> {
-  const account = await getActiveAccount();
+  const account = await resolveAccountForInvocation();
   if (!account) return null;
+
+  // Confirms which committee this specific invocation actually used — printed on stderr
+  // (never stdout) so it can't be confused with a *different* invocation's --help banner,
+  // and can't interfere with JSON output either.
+  const nameLabel = account.name ? ` [${account.name}]` : '';
+  console.error(chalk.gray(`Using account: ${formatAccountStatus(account)}${nameLabel}`));
 
   if (!isBearerTokenExpired(account)) {
     return account.vanBearerToken;
@@ -133,15 +210,16 @@ async function getClient() {
       return client;
     }
 
-    // Fall back to Basic auth with API key.
     const resolved = resolveProfile();
     if (!resolved) {
-      console.error(chalk.red('Error: No credentials found. Either:'));
-      console.error(chalk.yellow('  van auth login         Log in with your ActionID account'));
-      console.error(chalk.yellow('  --profile <name>       Use a named API key profile'));
-      console.error(chalk.yellow('  VAN_API_KEY=<key>      Environment variable for API key'));
-      console.error(chalk.yellow('  ~/.van/config          Add api_key under [default]'));
-      process.exit(1);
+      emitError(EXIT_AUTH_REQUIRED, 'AuthRequired', 'No credentials found.', {
+        hints: [
+          'van auth login         Log in with your ActionID account',
+          '--profile <name>       Use a named API key profile',
+          'VAN_API_KEY=<key>      Environment variable for API key',
+          '~/.van/config          Add api_key under [default]',
+        ],
+      });
     }
 
     const warning = checkConfigPermissions();
@@ -264,15 +342,18 @@ function outputResult(data: unknown, options: Record<string, unknown> = {}) {
 
 // Error handler
 
-function handleError(error: unknown) {
-  if (error instanceof VanApiError) {
-    console.error(chalk.red(`VAN API Error (${error.status}): ${error.message}`));
-  } else if (error instanceof Error) {
-    console.error(chalk.red(`Error: ${error.message}`));
-  } else {
-    console.error(chalk.red('An unexpected error occurred.'));
+function handleError(error: unknown): never {
+  if (error instanceof CliExit) {
+    // Already printed by emitError — pass it through unchanged rather than re-wrapping it.
+    throw error;
   }
-  process.exit(1);
+  if (error instanceof VanApiError) {
+    emitError(EXIT_API_ERROR, 'VanApiError', error.message, { status: error.status });
+  } else if (error instanceof Error) {
+    emitError(EXIT_API_ERROR, error.name, error.message);
+  } else {
+    emitError(EXIT_API_ERROR, 'UnknownError', 'An unexpected error occurred.');
+  }
 }
 
 function parseGlobalJsonPayload(options: Record<string, unknown>) {
@@ -285,9 +366,9 @@ function parseGlobalJsonPayload(options: Record<string, unknown>) {
     }
     return parsed as Record<string, unknown>;
   } catch {
-    console.error(chalk.red(`Invalid JSON in --json flag.`));
-    console.error(chalk.yellow(`Tip: Ensure your JSON is properly quoted. Example: --json '{"firstName":"John"}'`));
-    process.exit(1);
+    emitError(EXIT_VALIDATION_ERROR, 'InvalidJson', 'Invalid JSON in --json flag.', {
+      hint: `Ensure your JSON is properly quoted. Example: --json '{"firstName":"John"}'`,
+    });
   }
 }
 
@@ -319,29 +400,25 @@ function mergeJsonOption(cliOptions: Record<string, unknown>, globalOpts: Record
 function validatePositiveInt(value: string, label: string): number {
   const num = Number(value);
   if (!Number.isInteger(num) || num <= 0) {
-    console.error(chalk.red(`Error: ${label} must be a positive integer, got: "${value}"`));
-    process.exit(1);
+    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must be a positive integer, got: "${value}"`);
   }
   return num;
 }
 
 function validateNonemptyString(value: string, label: string): string {
   if ((value || "").length < 1) {
-    console.error(chalk.red(`Error: ${label} must be a valid string: "${value}"`));
-    process.exit(1);
+    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must be a valid string: "${value}"`);
   }
   return value;
 }
 
 function validateDate(value: string, label: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    console.error(chalk.red(`Error: ${label} must be a valid date in YYYY-MM-DD format, got: "${value}"`));
-    process.exit(1);
+    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must be a valid date in YYYY-MM-DD format, got: "${value}"`);
   }
   const parsed = new Date(value + 'T00:00:00');
   if (Number.isNaN(parsed.getTime())) {
-    console.error(chalk.red(`Error: ${label} is not a valid date: "${value}"`));
-    process.exit(1);
+    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} is not a valid date: "${value}"`);
   }
   return value;
 }
@@ -351,12 +428,10 @@ function validateWebhookUrl(value: string, label: string): string {
   try {
     parsed = new URL(value);
   } catch {
-    console.error(chalk.red(`Error: ${label} must be a valid URL, got: "${value}"`));
-    process.exit(1);
+    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must be a valid URL, got: "${value}"`);
   }
   if (parsed.protocol !== 'https:') {
-    console.error(chalk.red(`Error: ${label} must use HTTPS`));
-    process.exit(1);
+    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must use HTTPS`);
   }
   const hostname = parsed.hostname.toLowerCase();
   const privatePatterns = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
@@ -369,8 +444,7 @@ function validateWebhookUrl(value: string, label: string): string {
       return second >= 16 && second <= 31;
     })()
   ) {
-    console.error(chalk.red(`Error: ${label} must not point to a private/internal address`));
-    process.exit(1);
+    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must not point to a private/internal address`);
   }
   return value;
 }
@@ -535,11 +609,27 @@ function extractCommandSchema(cmd: Command) {
 
 // --- Set up the main program ---
 
-// Metadata-only (no secret store lookup) so the --help banner stays fast on every invocation.
+// This banner is built before Commander parses argv (its text has to already exist for
+// --help), so a --use-account override can't be read via program.opts() yet — scan argv
+// manually instead. Metadata-only (no secret store lookup) so --help stays fast.
+function findAccountOverrideInArgv(argv: string[]): string | undefined {
+  const idx = argv.findIndex(arg => arg === '--use-account' || arg.startsWith('--use-account='));
+  if (idx === -1) return undefined;
+  const arg = argv[idx];
+  return arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[idx + 1];
+}
+
 const loginStatus = (() => {
+  const accountOverride = findAccountOverrideInArgv(process.argv) || process.env.VAN_ACCOUNT;
+  if (accountOverride) {
+    const meta = findAccountMetadataByName(accountOverride);
+    return meta
+      ? chalk.green(`Using account: ${formatAccountStatus(meta)} [${accountOverride}] (override)`)
+      : chalk.yellow(`--use-account/VAN_ACCOUNT "${accountOverride}" not found. Run "van auth status" to see stored accounts.`);
+  }
   const account = getActiveAccountMetadata();
   if (!account) return '';
-  return chalk.green(`Logged in as: ${formatAccountStatus(account)}`);
+  return chalk.green(`Default account: ${formatAccountStatus(account)}`);
 })();
 
 program
@@ -548,6 +638,7 @@ program
     'NGP VAN API CLI tool.' +
     (loginStatus ? `\n${loginStatus}` : '') +
     '\n\nSupports --json, --dry-run, --fields, and --profile for agent-friendly usage.' +
+    '\nRun "van schema" for a full machine-readable list of commands, arguments, and options.' +
     '\n\nAPI docs: https://docs.ngpvan.com (append .md for agent-consumable format, e.g. https://docs.ngpvan.com/reference/people.md)'
   )
   .version(version)
@@ -555,25 +646,32 @@ program
   .option('--json <payload>', 'Raw JSON object to merge with CLI options (CLI flags take precedence)')
   .option('--dry-run', 'Print the HTTP request that would be made without executing it')
   .option('--fields <keys>', 'Comma-separated list of fields to include in the output')
-  .option('--profile <name>', 'Use a named profile from ./.van/config or ~/.van/config (overrides VAN_PROFILE env)');
+  .option('--profile <name>', 'Use a named profile from ./.van/config or ~/.van/config (overrides VAN_PROFILE env)')
+  .option('--use-account <name>', 'Use a specific stored login account for this command only, without changing the default (also settable via VAN_ACCOUNT)');
 
 // --- Auth commands ---
 
 const authCmd = program
   .command('auth')
-  .description('Manage authentication accounts\n                        login [--committee --name] | logout [--account] | switch [--account] | status');
+  .description(
+    'Manage authentication accounts\n                        login [--committee --name --device-code] | logout [--account] | switch [--account] | status' +
+    '\n\n                        Three ways to pick which stored account a command uses, in order of scope:' +
+    '\n                          --use-account <name>   this single command only, changes nothing' +
+    '\n                          VAN_ACCOUNT=<name>     this shell session only' +
+    '\n                          auth switch            the persistent default for every session, until switched again'
+  );
 
 authCmd
   .command('login')
   .description('Log in with your ActionID account via browser')
   .option('--name <name>', 'Alias for this account')
   .option('--committee <name>', 'Committee name to select (partial match, skips interactive prompt)')
+  .option('--device-code', 'Use a device code instead of a local browser redirect (for SSH/headless sessions)')
   .action(async (options) => {
     try {
-      await runLogin(options.name, options.committee);
-    } catch (err: any) {
-      console.error(chalk.red(`Login failed: ${err.message}`));
-      process.exit(1);
+      await runLogin(options.name, options.committee, options.deviceCode);
+    } catch (err) {
+      handleError(err);
     }
   });
 
@@ -584,41 +682,40 @@ authCmd
   .action(async (opts) => {
     try {
       await runLogout(opts.account);
-    } catch (err: any) {
-      console.error(chalk.red(`Logout failed: ${err.message}`));
-      process.exit(1);
+    } catch (err) {
+      handleError(err);
     }
   });
 
 authCmd
   .command('switch')
-  .description('Switch between stored accounts (no browser required)')
-  .option('--account <name>', 'Switch directly to a named account')
+  .description('Set the persistent default account used when no --use-account/VAN_ACCOUNT override is given')
+  .option('--account <name>', 'Set the default directly to a named account, skipping the interactive picker')
   .action(async (options) => {
     try {
       await runSwitch(options.account);
-    } catch (err: any) {
-      console.error(chalk.red(`Switch failed: ${err.message}`));
-      process.exit(1);
+    } catch (err) {
+      handleError(err);
     }
   });
 
 authCmd
   .command('status')
-  .description('Show login status for all stored accounts')
+  .description('Show stored accounts, which is the persistent default, and which would actually be used right now')
   .action(async () => {
-    const accounts = await listAccounts();
-    if (accounts.length === 0) {
-      console.log(chalk.yellow('Not logged in. Run "van auth login" to authenticate.'));
-      return;
-    }
-    console.log('\nVAN accounts:\n');
-    for (const { account, isActive } of accounts) {
-      const check = isActive ? chalk.green('✓') : chalk.gray('-');
-      const nameLabel = account.name ? chalk.cyan(` [${account.name}]`) : '';
-      console.log(`  ${check} ${account.userName} / ${account.committeeName}${nameLabel}`);
-    }
-    console.log();
+    const metas = listAccountMetadata();
+    const effective = await resolveAccountForInvocation({ silent: true });
+    const effectiveKey = effective ? accountKey(effective) : undefined;
+
+    const data = metas.map(({ key, userName, committeeName, name, isActive }) => ({
+      key,
+      userName,
+      committeeName,
+      name,
+      isActive,
+      isEffective: key === effectiveKey,
+    }));
+    outputResult(data, program.opts());
   });
 
 const internalCompleteCmd = new Command('__complete');
@@ -687,11 +784,8 @@ const schemaCmd = program
     const actionKey = parts[1];
 
     if (!data[resourceKey]) {
-      let msg = `Unknown resource: "${resourceKey}".`;
       const suggestion = suggestClosest(resourceKey, allResources);
-      if (suggestion) msg += ` Did you mean "${suggestion}"?`;
-      console.error(chalk.red(msg));
-      process.exit(1);
+      emitError(EXIT_VALIDATION_ERROR, 'UnknownResource', `Unknown resource: "${resourceKey}".`, suggestion ? { suggestion } : {});
     }
 
     if (!actionKey) {
@@ -702,11 +796,8 @@ const schemaCmd = program
     const actions = data[resourceKey].actions as Record<string, unknown>;
     const allActions = Object.keys(actions);
     if (!actions[actionKey]) {
-      let msg = `Unknown action: "${actionKey}" for resource "${resourceKey}".`;
       const suggestion = suggestClosest(actionKey, allActions);
-      if (suggestion) msg += ` Did you mean "${suggestion}"?`;
-      console.error(chalk.red(msg));
-      process.exit(1);
+      emitError(EXIT_VALIDATION_ERROR, 'UnknownAction', `Unknown action: "${actionKey}" for resource "${resourceKey}".`, suggestion ? { suggestion } : {});
     }
 
     outputResult(actions[actionKey], program.opts());
@@ -1589,8 +1680,7 @@ signupsCmd
   .action(async (options) => {
     try {
       if (!options.eventId && !options.vanId) {
-        console.error(chalk.red('Error: At least one of --eventId or --vanId is required.'));
-        process.exit(1);
+        emitError(EXIT_VALIDATION_ERROR, 'ValidationError', 'At least one of --eventId or --vanId is required.');
       }
       const api = createSignups(await getClient());
       const signups = await api.list(options);
@@ -2100,8 +2190,7 @@ configCmd
     if (removeProfile(name)) {
       console.log(chalk.green(`Profile "${name}" removed.`));
     } else {
-      console.error(chalk.red(`Profile "${name}" not found.`));
-      process.exit(1);
+      emitError(EXIT_VALIDATION_ERROR, 'ProfileNotFound', `Profile "${name}" not found.`);
     }
   });
 
@@ -2112,8 +2201,7 @@ configCmd
     if (setDefaultProfile(name)) {
       console.log(chalk.green(`Default profile set to "${name}".`));
     } else {
-      console.error(chalk.red(`Profile "${name}" not found.`));
-      process.exit(1);
+      emitError(EXIT_VALIDATION_ERROR, 'ProfileNotFound', `Profile "${name}" not found.`);
     }
   });
 
@@ -2124,8 +2212,7 @@ configCmd
     const profiles = loadConfig();
     const p = profiles[name];
     if (!p) {
-      console.error(chalk.red(`Profile "${name}" not found.`));
-      process.exit(1);
+      emitError(EXIT_VALIDATION_ERROR, 'ProfileNotFound', `Profile "${name}" not found.`);
     }
     const display: Record<string, string> = {};
     for (const [k, v] of Object.entries(p)) {
@@ -2245,4 +2332,13 @@ function normalizeEndpoint(endpoint: string): string {
 }
 
 // Parse command line arguments
-program.parseAsync(process.argv);
+program.parseAsync(process.argv).catch((error) => {
+  if (error instanceof CliExit) {
+    finalizeExit(error.code);
+    return;
+  }
+  // Something escaped without going through emitError/handleError — still avoid the
+  // Windows fetch+exit race rather than calling process.exit() directly here.
+  console.error(error);
+  finalizeExit(EXIT_API_ERROR);
+});

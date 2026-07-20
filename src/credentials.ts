@@ -44,9 +44,7 @@ export function loadCredentialsFile(): CredentialsFile {
           `Warning: ${credPath} is readable by others. Run: chmod 600 ${credPath}\n`
         );
       }
-    } catch {
-      // file doesn't exist yet
-    }
+    } catch {}
   }
 
   try {
@@ -108,6 +106,32 @@ export function getActiveAccountMetadata(): Pick<Account, 'userName' | 'committe
   const stored = file.accounts[file.activeAccount];
   if (!stored) return null;
   return { userName: stored.userName, committeeName: stored.committeeName, name: stored.name };
+}
+
+// Sync, no secret-store lookup — lets callers check how many accounts are stored (and
+// which is active) without paying an OS keychain/DPAPI round-trip per account.
+export function listAccountMetadata(): Array<Pick<Account, 'userName' | 'committeeName' | 'name'> & { key: string; isActive: boolean }> {
+  const file = loadCredentialsFile();
+  return Object.entries(file.accounts).map(([key, stored]) => ({
+    key,
+    userName: stored.userName,
+    committeeName: stored.committeeName,
+    name: stored.name,
+    isActive: key === file.activeAccount,
+  }));
+}
+
+// Sync, no secret-store lookup — same idea as getActiveAccountMetadata() but resolves a
+// specific named account instead of the persisted "active" one.
+export function findAccountMetadataByName(name: string): Pick<Account, 'userName' | 'committeeName' | 'name'> | null {
+  const file = loadCredentialsFile();
+  const lower = name.toLowerCase();
+  for (const stored of Object.values(file.accounts)) {
+    if (stored.name?.toLowerCase() === lower) {
+      return { userName: stored.userName, committeeName: stored.committeeName, name: stored.name };
+    }
+  }
+  return null;
 }
 
 export async function addAccount(account: Account): Promise<void> {

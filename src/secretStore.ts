@@ -29,8 +29,13 @@ function execWithStdin(cmd: string, args: string[], input: string): Promise<numb
 }
 
 // security's `-i` interactive parser tokenizes like a shell: double-quoted strings with
-// backslash escapes for embedded quotes/backslashes.
+// backslash escapes for embedded quotes/backslashes. It reads one command per line, so a
+// raw newline in an argument would terminate the command early and let the rest of the
+// line run as a second command — reject that case rather than trying to encode it.
 function quoteForSecurity(value: string): string {
+  if (/[\r\n]/.test(value)) {
+    throw new Error('Value cannot contain a newline.');
+  }
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
@@ -74,9 +79,7 @@ const macBackend: SecretBackend = {
   async remove(key) {
     try {
       await execFileAsync('security', ['delete-generic-password', '-a', key, '-s', SERVICE]);
-    } catch {
-      // already gone — fine
-    }
+    } catch {}
   },
 };
 
@@ -105,9 +108,7 @@ const linuxBackend: SecretBackend = {
   async remove(key) {
     try {
       await execFileAsync('secret-tool', ['clear', 'service', SERVICE, 'account', key]);
-    } catch {
-      // already gone — fine
-    }
+    } catch {}
   },
 };
 
@@ -247,7 +248,5 @@ export async function deleteSecrets(key: string): Promise<void> {
   if (!backend) return;
   try {
     await backend.remove(key);
-  } catch {
-    // best-effort
-  }
+  } catch {}
 }
