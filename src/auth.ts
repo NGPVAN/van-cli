@@ -1,14 +1,9 @@
 import * as crypto from 'crypto';
 import * as http from 'http';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { CALLBACK_PORT } from './config';
 import { DEFAULT_LOGIN_URL } from './client';
-
-export interface PkceAuthUrlResponse {
-  authorizationUrl: string;
-  tokenEndpoint: string;
-  clientId: string;
-}
+import { fetchAuthConfig } from './authConfig';
 
 interface TokenResponse {
   access_token: string;
@@ -22,6 +17,8 @@ const LISTEN_HOST = '127.0.0.1';
 const LOCALHOST_BASE = 'http://localhost';
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const GRANT_TYPE_AUTH_CODE = 'authorization_code';
+const GRANT_TYPE_REFRESH_TOKEN = 'refresh_token';
+const LOGIN_SCOPE = 'openid profile email offline_access ngpvan.cli.bearer';
 const REDIRECT_URI = `http://${LISTEN_HOST}:${CALLBACK_PORT}${CALLBACK_PATH}`;
 
 function escapeHtml(str: string): string {
@@ -53,16 +50,16 @@ function generateState(): string {
 }
 
 function openBrowser(url: string): void {
-  // Validate the URL is HTTPS before passing to the shell — guards against a compromised server response.
+  // Validate the URL is HTTPS before handing it to the OS — guards against a compromised server response.
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:') {
     throw new Error('Authorization URL must use HTTPS.');
   }
 
   if (process.platform === 'win32') {
-    // On Windows, use exec with the URL double-quoted so cmd.exe treats & in query strings as literal.
-    // execFile passes args unquoted, causing & to be parsed as a command separator.
-    exec(`start "" "${url}"`);
+    // rundll32 is a real executable (not a cmd.exe builtin like `start`), so this goes
+    // straight to CreateProcess with an argument array — no shell ever parses the URL.
+    execFile('rundll32', ['url.dll,FileProtocolHandler', url]);
   } else if (process.platform === 'darwin') {
     execFile('open', [url]);
   } else {
@@ -153,26 +150,19 @@ export interface PkceFlowResult {
 }
 
 export async function runPkceFlow(): Promise<PkceFlowResult> {
+  const { domain, clientId, audience } = await fetchAuthConfig(DEFAULT_LOGIN_URL);
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
   const state = generateState();
+  const tokenEndpoint = `${domain}/oauth/token`;
 
-  const params = new URLSearchParams({ codeChallenge, redirectUri: REDIRECT_URI, state });
-  let configRes: Response;
-  try {
-    configRes = await fetch(
-      `${DEFAULT_LOGIN_URL}/vanCli/api/v1/vanApi/authUrl?${params}`
-    );
-  } catch (err: any) {
-    throw new Error(`Failed to reach login server at ${DEFAULT_LOGIN_URL}: ${err.cause?.message ?? err.message}`);
-  }
-
-  if (!configRes.ok) {
-    throw new Error(`Failed to get authorization URL from server (${configRes.status})`);
-  }
-
-  const { authorizationUrl, tokenEndpoint, clientId } =
-    (await configRes.json()) as PkceAuthUrlResponse;
+  const authorizationUrl =
+    `${domain}/authorize?client_id=${encodeURIComponent(clientId)}` +
+    `&response_type=code&scope=${encodeURIComponent(LOGIN_SCOPE)}` +
+    `&audience=${encodeURIComponent(audience)}` +
+    `&code_challenge=${encodeURIComponent(codeChallenge)}` +
+    '&code_challenge_method=S256' +
+    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=${encodeURIComponent(state)}`;
 
   // Start listening before opening the browser to avoid missing the callback.
   const callbackPromise = waitForCallback(CALLBACK_PORT);
@@ -199,4 +189,59 @@ export async function runPkceFlow(): Promise<PkceFlowResult> {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
   };
+}
+
+export interface RefreshResult {
+  accessToken: string;
+  refreshToken: string;
+}
+
+// Refreshes the access token directly against the identity provider — no VAN backend
+// involved. The resulting access token still needs to be exchanged for a VAN bearer
+// token via fetchVanToken().
+export async function refreshAccessToken(refreshToken: string): Promise<RefreshResult> {
+  const { domain, clientId } = await fetchAuthConfig(DEFAULT_LOGIN_URL);
+
+  const params = new URLSearchParams({
+    grant_type: GRANT_TYPE_REFRESH_TOKEN,
+    client_id: clientId,
+    refresh_token: refreshToken,
+  });
+
+  const res = await fetch(`${domain}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Token refresh failed (${res.status})`);
+  }
+
+  const tokens = (await res.json()) as TokenResponse;
+  if (!tokens.refresh_token) {
+    throw new Error('Identity provider did not return a rotated refresh token.');
+  }
+
+  return {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+  };
+}
+
+// Revokes the refresh token with the identity provider on logout, so a copy of it (an
+// old backup, a stolen credentials file) stops working immediately rather than staying
+// valid until it would have naturally expired.
+export async function revokeToken(refreshToken: string): Promise<void> {
+  const { domain, clientId } = await fetchAuthConfig(DEFAULT_LOGIN_URL);
+
+  const res = await fetch(`${domain}/oauth/revoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: clientId, token: refreshToken }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Token revocation failed (${res.status})`);
+  }
 }

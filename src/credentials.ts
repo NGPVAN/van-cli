@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { saveSecrets, loadSecrets, deleteSecrets, type StoredSecrets } from './secretStore';
 
 export interface Account {
   refreshToken: string;
@@ -13,9 +14,14 @@ export interface Account {
   name?: string;
 }
 
+// What's actually persisted to credentials.json. Tokens are omitted here whenever the
+// OS secret store accepts them (see secretStore.ts) — they're present only as a fallback
+// for platforms/environments where no OS store is available.
+type StoredAccount = Omit<Account, 'refreshToken' | 'vanBearerToken'> & Partial<StoredSecrets>;
+
 export interface CredentialsFile {
   activeAccount: string | null;
-  accounts: Record<string, Account>;
+  accounts: Record<string, StoredAccount>;
 }
 
 const VAN_BEARER_TOKEN_TTL_HOURS = 4;
@@ -51,13 +57,6 @@ export function loadCredentialsFile(): CredentialsFile {
       return { activeAccount: null, accounts: {} };
     }
 
-    // Migrate old single-account format
-    if (!('accounts' in parsed) && 'userName' in parsed) {
-      const old = parsed as Account;
-      const key = accountKey(old);
-      return { activeAccount: key, accounts: { [key]: old } };
-    }
-
     const file = parsed as CredentialsFile;
     return {
       activeAccount: file.activeAccount ?? null,
@@ -77,27 +76,75 @@ export function saveCredentialsFile(file: CredentialsFile): void {
   fs.renameSync(tmpPath, credPath);
 }
 
-export function getActiveAccount(): Account | null {
-  const file = loadCredentialsFile();
-  if (!file.activeAccount) return null;
-  return file.accounts[file.activeAccount] ?? null;
+// Fills in refreshToken/vanBearerToken from the OS secret store when they weren't stored
+// on disk. If the store has since lost the entry (e.g. keychain tampered with by hand),
+// callers get empty strings and any API call will fail loudly with an auth error rather
+// than silently using a stale token.
+async function hydrateAccount(key: string, stored: StoredAccount): Promise<Account> {
+  if (stored.refreshToken !== undefined && stored.vanBearerToken !== undefined) {
+    return stored as Account;
+  }
+  const secrets = await loadSecrets(key);
+  return {
+    ...stored,
+    refreshToken: secrets?.refreshToken ?? '',
+    vanBearerToken: secrets?.vanBearerToken ?? '',
+  };
 }
 
-export function addAccount(account: Account): void {
+export async function getActiveAccount(): Promise<Account | null> {
+  const file = loadCredentialsFile();
+  if (!file.activeAccount) return null;
+  const stored = file.accounts[file.activeAccount];
+  if (!stored) return null;
+  return hydrateAccount(file.activeAccount, stored);
+}
+
+// Sync, no secret-store lookup — safe to call unconditionally at CLI startup (e.g. for
+// the --help banner) without adding OS keychain/DPAPI latency to every invocation.
+export function getActiveAccountMetadata(): Pick<Account, 'userName' | 'committeeName' | 'name'> | null {
+  const file = loadCredentialsFile();
+  if (!file.activeAccount) return null;
+  const stored = file.accounts[file.activeAccount];
+  if (!stored) return null;
+  return { userName: stored.userName, committeeName: stored.committeeName, name: stored.name };
+}
+
+export async function addAccount(account: Account): Promise<void> {
   const file = loadCredentialsFile();
   const key = accountKey(account);
-  file.accounts[key] = account;
+  const { refreshToken, vanBearerToken, ...metadata } = account;
+
+  const storedSecurely = await saveSecrets(key, { refreshToken, vanBearerToken });
+  if (!storedSecurely) {
+    console.error(
+      'Note: no OS secret store is available, so login tokens will be stored in ~/.van/credentials.json (permissions restricted to your user).'
+    );
+  }
+
+  file.accounts[key] = storedSecurely ? metadata : { ...metadata, refreshToken, vanBearerToken };
   file.activeAccount = key;
   saveCredentialsFile(file);
 }
 
-export function updateAccountTokens(
+export async function updateAccountTokens(
   key: string,
   tokens: Pick<Account, 'vanBearerToken' | 'vanBearerTokenExpiry' | 'refreshToken'>
-): void {
+): Promise<void> {
   const file = loadCredentialsFile();
-  if (!file.accounts[key]) return;
-  file.accounts[key] = { ...file.accounts[key], ...tokens };
+  const existing = file.accounts[key];
+  if (!existing) return;
+
+  const { refreshToken, vanBearerToken, ...existingMetadata } = existing;
+  const storedSecurely = await saveSecrets(key, {
+    refreshToken: tokens.refreshToken,
+    vanBearerToken: tokens.vanBearerToken,
+  });
+
+  file.accounts[key] = storedSecurely
+    ? { ...existingMetadata, vanBearerTokenExpiry: tokens.vanBearerTokenExpiry }
+    : { ...existingMetadata, ...tokens };
+
   saveCredentialsFile(file);
 }
 
@@ -109,7 +156,7 @@ export function setActiveAccount(key: string): boolean {
   return true;
 }
 
-export function removeAccount(key: string): boolean {
+export async function removeAccount(key: string): Promise<boolean> {
   const file = loadCredentialsFile();
   if (!file.accounts[key]) return false;
   delete file.accounts[key];
@@ -117,27 +164,30 @@ export function removeAccount(key: string): boolean {
     file.activeAccount = null;
   }
   saveCredentialsFile(file);
+  await deleteSecrets(key);
   return true;
 }
 
-export function findAccountByName(name: string): { key: string; account: Account } | null {
+export async function findAccountByName(name: string): Promise<{ key: string; account: Account } | null> {
   const file = loadCredentialsFile();
   const lower = name.toLowerCase();
-  for (const [key, account] of Object.entries(file.accounts)) {
-    if (account.name?.toLowerCase() === lower) {
-      return { key, account };
+  for (const [key, stored] of Object.entries(file.accounts)) {
+    if (stored.name?.toLowerCase() === lower) {
+      return { key, account: await hydrateAccount(key, stored) };
     }
   }
   return null;
 }
 
-export function listAccounts(): Array<{ key: string; account: Account; isActive: boolean }> {
+export async function listAccounts(): Promise<Array<{ key: string; account: Account; isActive: boolean }>> {
   const file = loadCredentialsFile();
-  return Object.entries(file.accounts).map(([key, account]) => ({
-    key,
-    account,
-    isActive: key === file.activeAccount,
-  }));
+  return Promise.all(
+    Object.entries(file.accounts).map(async ([key, stored]) => ({
+      key,
+      account: await hydrateAccount(key, stored),
+      isActive: key === file.activeAccount,
+    }))
+  );
 }
 
 export function isBearerTokenExpired(account: Account): boolean {
@@ -150,6 +200,6 @@ export function bearerTokenExpiry(): string {
   return expiry.toISOString();
 }
 
-export function formatAccountStatus(account: Account): string {
+export function formatAccountStatus(account: Pick<Account, 'userName' | 'committeeName'>): string {
   return `${account.userName} / ${account.committeeName}`;
 }

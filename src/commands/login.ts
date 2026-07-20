@@ -1,5 +1,6 @@
 import { DEFAULT_LOGIN_URL } from '../client';
 import { runPkceFlow } from '../auth';
+import { fetchVanToken, type VanUser, type VanTenant } from '../vanToken';
 import {
   addAccount,
   bearerTokenExpiry,
@@ -8,24 +9,6 @@ import {
   type Account,
 } from '../credentials';
 import { prompt } from '../prompt';
-
-interface VanTenant {
-  committeeId: number;
-  committeeName: string;
-  stateId: string;
-  tenantUri: string;
-}
-
-interface VanUser {
-  userId: number;
-  userName: string;
-  tenants: VanTenant[];
-}
-
-interface TokenResponse {
-  users: VanUser[];
-  bearerToken?: string;
-}
 
 async function selectUserAndCommittee(users: VanUser[], committee?: string): Promise<{ user: VanUser; tenant: VanTenant }> {
   const options: Array<{ user: VanUser; tenant: VanTenant }> = [];
@@ -58,7 +41,7 @@ async function selectUserAndCommittee(users: VanUser[], committee?: string): Pro
     return matches[0];
   }
 
-  const existing = new Set(listAccounts().map(a => a.key));
+  const existing = new Set((await listAccounts()).map(a => a.key));
 
   console.log('\nSelect a user/committee to add:\n');
   options.forEach((opt, i) => {
@@ -83,21 +66,7 @@ export async function runLogin(name?: string, committee?: string): Promise<void>
 
   const { accessToken, refreshToken } = await runPkceFlow();
 
-  const tokenRes = await fetch(
-    `${DEFAULT_LOGIN_URL}/vanCli/api/v1/vanApi/token`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: '{}',
-    }
-  );
-
-  if (!tokenRes.ok) {
-    const body = await tokenRes.text();
-    throw new Error('Authentication failed. Please try again or contact support.');
-  }
-
-  const tokenData = (await tokenRes.json()) as TokenResponse;
+  const tokenData = await fetchVanToken(DEFAULT_LOGIN_URL, accessToken);
   const users = tokenData.users ?? [];
 
   const allCombos = users.flatMap(u => u.tenants.map(t => ({ u, t })));
@@ -120,20 +89,10 @@ export async function runLogin(name?: string, committee?: string): Promise<void>
     selectedUser = user;
     selectedTenant = tenant;
 
-    const filterRes = await fetch(
-      `${DEFAULT_LOGIN_URL}/vanCli/api/v1/vanApi/token` +
-      `?userId=${user.userId}&tenantUri=${encodeURIComponent(tenant.tenantUri)}`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
-    );
-
-    if (!filterRes.ok) {
-      throw new Error('Authentication failed. Please try again or contact support.');
-    }
-
-    const filtered = (await filterRes.json()) as TokenResponse;
+    const filtered = await fetchVanToken(DEFAULT_LOGIN_URL, accessToken, {
+      userId: user.userId,
+      tenantUri: tenant.tenantUri,
+    });
     if (!filtered.bearerToken) {
       throw new Error('Authentication failed. Please try again or contact support.');
     }
@@ -156,7 +115,7 @@ export async function runLogin(name?: string, committee?: string): Promise<void>
     name: resolvedName,
   };
 
-  addAccount(account);
+  await addAccount(account);
 
   console.log(`\nLogged in as: ${selectedUser.userName} / ${selectedTenant.committeeName} [${resolvedName}]`);
   console.log('Run "van auth status" to see all stored accounts.');

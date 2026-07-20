@@ -1,8 +1,9 @@
 import { removeAccount, listAccounts, findAccountByName } from '../credentials';
+import { revokeToken } from '../auth';
 import { prompt } from '../prompt';
 
 export async function runLogout(accountName?: string): Promise<void> {
-  const accounts = listAccounts();
+  const accounts = await listAccounts();
 
   if (accounts.length === 0) {
     console.log('Not currently logged in.');
@@ -12,7 +13,7 @@ export async function runLogout(accountName?: string): Promise<void> {
   let selected: typeof accounts[0];
 
   if (accountName) {
-    const found = findAccountByName(accountName);
+    const found = await findAccountByName(accountName);
     if (!found) {
       throw new Error(`No account found with name "${accountName}". Run "van auth status" to see stored accounts.`);
     }
@@ -39,7 +40,14 @@ export async function runLogout(accountName?: string): Promise<void> {
     }
   }
 
-  removeAccount(selected.key);
+  try {
+    await revokeToken(selected.account.refreshToken);
+  } catch {
+    // Best-effort — still remove the local credential even if the identity provider
+    // is unreachable or the token was already revoked/expired.
+  }
+
+  await removeAccount(selected.key);
   console.log(`Logged out: ${selected.account.userName} / ${selected.account.committeeName}`);
 
   if (accounts.length > 1) {

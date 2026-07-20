@@ -4,8 +4,11 @@ import { version } from '../package.json';
 import { VanApiError } from './errors';
 import { getProfile, checkConfigPermissions } from './config';
 import VanApiClient, { DEFAULT_LOGIN_URL } from './client';
+import { refreshAccessToken } from './auth';
+import { fetchVanToken } from './vanToken';
 import {
   getActiveAccount,
+  getActiveAccountMetadata,
   updateAccountTokens,
   listAccounts,
   accountKey,
@@ -69,48 +72,50 @@ function resolveProfile(): { apiKey: string; appName?: string } | null {
 let client: VanApiClient | null = null;
 
 async function resolveBearerToken(): Promise<string | null> {
-  const account = getActiveAccount();
+  const account = await getActiveAccount();
   if (!account) return null;
 
   if (!isBearerTokenExpired(account)) {
     return account.vanBearerToken;
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
-  try {
-    const res = await fetch(
-      `${DEFAULT_LOGIN_URL}/vanCli/api/v1/vanApi/refreshToken`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          refreshToken: account.refreshToken,
-          userId: account.userId,
-          tenantUri: account.tenantUri,
-        }),
-        signal: controller.signal,
-      }
-    );
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timeout')), 15_000);
+  });
 
-    if (!res.ok) {
+  try {
+    const { accessToken, refreshToken } = await Promise.race([
+      refreshAccessToken(account.refreshToken),
+      timeout,
+    ]);
+
+    const tokenData = await Promise.race([
+      fetchVanToken(DEFAULT_LOGIN_URL, accessToken, {
+        userId: account.userId,
+        tenantUri: account.tenantUri,
+      }),
+      timeout,
+    ]);
+
+    if (!tokenData.bearerToken) {
       // Refresh token rejected (expired or rotated away). User must log in again.
       console.error(chalk.yellow('Session expired. Run "van auth login" to re-authenticate.'));
       return null;
     }
 
-    const data = (await res.json()) as { bearerToken: string; refreshToken: string };
-    updateAccountTokens(accountKey(account), {
-      vanBearerToken: data.bearerToken,
+    await updateAccountTokens(accountKey(account), {
+      vanBearerToken: tokenData.bearerToken,
       vanBearerTokenExpiry: bearerTokenExpiry(),
-      refreshToken: data.refreshToken,
+      refreshToken,
     });
 
-    return data.bearerToken;
+    return tokenData.bearerToken;
   } catch {
+    console.error(chalk.yellow('Session expired. Run "van auth login" to re-authenticate.'));
     return null;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timer!);
   }
 }
 
@@ -530,8 +535,9 @@ function extractCommandSchema(cmd: Command) {
 
 // --- Set up the main program ---
 
+// Metadata-only (no secret store lookup) so the --help banner stays fast on every invocation.
 const loginStatus = (() => {
-  const account = getActiveAccount();
+  const account = getActiveAccountMetadata();
   if (!account) return '';
   return chalk.green(`Logged in as: ${formatAccountStatus(account)}`);
 })();
@@ -600,8 +606,8 @@ authCmd
 authCmd
   .command('status')
   .description('Show login status for all stored accounts')
-  .action(() => {
-    const accounts = listAccounts();
+  .action(async () => {
+    const accounts = await listAccounts();
     if (accounts.length === 0) {
       console.log(chalk.yellow('Not logged in. Run "van auth login" to authenticate.'));
       return;
@@ -1336,7 +1342,7 @@ notesCmd
   .action(async (options) => {
     try {
       validatePositiveInt(options.vanId, 'vanId');
-      const api = createNotes(getClient());
+      const api = createNotes(await getClient());
       const notes = await api.list(options.vanId, options);
       outputResult(notes, program.opts());
     } catch (error) {
@@ -1352,7 +1358,7 @@ notesCmd
     try {
       validatePositiveInt(options.vanId, 'vanId');
       validatePositiveInt(noteId, 'noteId');
-      const api = createNotes(getClient());
+      const api = createNotes(await getClient());
       const note = await api.get(options.vanId, noteId);
       outputResult(note, program.opts());
     } catch (error) {
@@ -1424,7 +1430,7 @@ notesCmd
   .description('List valid note categories')
   .action(async () => {
     try {
-      const api = createNotes(getClient());
+      const api = createNotes(await getClient());
       outputResult(await api.categories(), program.opts());
     } catch (error) {
       handleError(error);

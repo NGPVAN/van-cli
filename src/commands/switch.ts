@@ -4,7 +4,7 @@ import { prompt } from '../prompt';
 
 export async function runSwitch(accountName?: string): Promise<void> {
   if (accountName) {
-    const found = findAccountByName(accountName);
+    const found = await findAccountByName(accountName);
     if (!found) {
       throw new Error(`No account found with name "${accountName}". Run "van auth status" to see stored accounts.`);
     }
@@ -13,7 +13,7 @@ export async function runSwitch(accountName?: string): Promise<void> {
     return;
   }
 
-  const accounts = listAccounts();
+  const accounts = await listAccounts();
 
   if (accounts.length === 0) {
     throw new Error('No accounts stored. Run "van auth login" first.');
