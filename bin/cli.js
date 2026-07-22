@@ -1,3 +1,3 @@
-#!/usr/bin/env node --use-system-ca
+#!/usr/bin/env node
 
 require('../dist/cli.js');
