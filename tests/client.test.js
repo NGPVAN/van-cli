@@ -95,4 +95,20 @@ describe('VanApiClient', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(400, { errors: [{ text: 'Bad request' }] }));
     await expect(noMode.get('/people')).rejects.toBeDefined();
   });
+
+  it('supports bearer token auth without requiring an apiKey', async () => {
+    const original = process.env.VAN_API_KEY;
+    delete process.env.VAN_API_KEY;
+
+    const client = new VanApiClient({ bearerToken: 'tok-123' });
+    expect(client.databaseMode).toBe(1);
+
+    mockFetch.mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    await expect(client.get('/people')).resolves.toEqual({ ok: true });
+
+    const [, init] = mockFetch.mock.calls.at(-1);
+    expect(init.headers.Authorization).toBe('Bearer tok-123');
+
+    process.env.VAN_API_KEY = original;
+  });
 });

@@ -209,10 +209,14 @@ async function isBackendAvailable(): Promise<boolean> {
   }
   if (linuxBackendAvailable === null) {
     try {
-      await execFileAsync('which', ['secret-tool']);
+      // Probe secret-tool directly rather than via `which` — some minimal/container images
+      // don't ship `which` at all even when secret-tool itself is present. `--help` is a
+      // universally-supported no-op for GOption-based CLIs like secret-tool, so any outcome
+      // other than ENOENT (binary missing) means the binary is present and invocable.
+      await execFileAsync('secret-tool', ['--help']);
       linuxBackendAvailable = true;
-    } catch {
-      linuxBackendAvailable = false;
+    } catch (err) {
+      linuxBackendAvailable = (err as NodeJS.ErrnoException)?.code !== 'ENOENT';
     }
   }
   return linuxBackendAvailable;

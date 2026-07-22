@@ -4,10 +4,11 @@ import { version } from '../package.json';
 import { VanApiError } from './errors';
 import { getProfile, checkConfigPermissions } from './config';
 import VanApiClient, { DEFAULT_LOGIN_URL } from './client';
-import { refreshAccessToken } from './auth';
+import { refreshAccessToken, RefreshRejectedError } from './auth';
 import { fetchVanToken } from './vanToken';
 import {
   getActiveAccount,
+  getSoleAccount,
   getActiveAccountMetadata,
   findAccountByName,
   findAccountMetadataByName,
@@ -129,7 +130,7 @@ async function resolveAccountForInvocation(options: { silent?: boolean } = {}): 
 
   const metas = listAccountMetadata();
   if (metas.length === 0) return null;
-  if (metas.length === 1) return getActiveAccount();
+  if (metas.length === 1) return getSoleAccount();
 
   if (!process.stdout.isTTY) {
     if (options.silent) return null;
@@ -188,8 +189,13 @@ async function resolveBearerToken(): Promise<string | null> {
     });
 
     return tokenData.bearerToken;
-  } catch {
-    console.error(chalk.yellow('Session expired. Run "van auth login" to re-authenticate.'));
+  } catch (err) {
+    if (err instanceof RefreshRejectedError) {
+      console.error(chalk.yellow('Session expired. Run "van auth login" to re-authenticate.'));
+    } else {
+      const detail = err instanceof Error && err.message === 'timeout' ? 'timed out' : 'hit a network or server error';
+      console.error(chalk.yellow(`Could not refresh your session (${detail}). Try again in a moment, or run "van auth login" if this keeps happening.`));
+    }
     return null;
   } finally {
     clearTimeout(timer!);

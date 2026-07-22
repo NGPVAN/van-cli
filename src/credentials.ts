@@ -98,6 +98,17 @@ export async function getActiveAccount(): Promise<Account | null> {
   return hydrateAccount(file.activeAccount, stored);
 }
 
+// Unlike getActiveAccount(), doesn't depend on the persisted "active" pointer — resolves
+// to the only stored account whenever there's exactly one, even if activeAccount is unset
+// (e.g. it was never set, or was cleared because the account it pointed to got removed).
+export async function getSoleAccount(): Promise<Account | null> {
+  const file = loadCredentialsFile();
+  const entries = Object.entries(file.accounts);
+  if (entries.length !== 1) return null;
+  const [key, stored] = entries[0];
+  return hydrateAccount(key, stored);
+}
+
 // Sync, no secret-store lookup — safe to call unconditionally at CLI startup (e.g. for
 // the --help banner) without adding OS keychain/DPAPI latency to every invocation.
 export function getActiveAccountMetadata(): Pick<Account, 'userName' | 'committeeName' | 'name'> | null {

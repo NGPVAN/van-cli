@@ -310,6 +310,11 @@ export interface RefreshResult {
   refreshToken: string;
 }
 
+// Thrown only when the identity provider has actually rejected the refresh token (expired,
+// revoked, or not rotated) — as opposed to a network blip or server error — so callers can
+// tell a real "you must log in again" from a transient failure worth just retrying.
+export class RefreshRejectedError extends Error {}
+
 // Refreshes the access token directly against the identity provider — no VAN backend
 // involved. The resulting access token still needs to be exchanged for a VAN bearer
 // token via fetchVanToken().
@@ -329,12 +334,18 @@ export async function refreshAccessToken(refreshToken: string): Promise<RefreshR
   });
 
   if (!res.ok) {
+    // A 4xx (typically invalid_grant) means the identity provider itself rejected the
+    // refresh token — the user genuinely needs to log in again. Anything else (5xx,
+    // maintenance windows) is a server-side/transient problem, not a rejection.
+    if (res.status >= 400 && res.status < 500) {
+      throw new RefreshRejectedError(`Token refresh failed (${res.status})`);
+    }
     throw new Error(`Token refresh failed (${res.status})`);
   }
 
   const tokens = (await res.json()) as TokenResponse;
   if (!tokens.refresh_token) {
-    throw new Error('Identity provider did not return a rotated refresh token.');
+    throw new RefreshRejectedError('Identity provider did not return a rotated refresh token.');
   }
 
   return {
