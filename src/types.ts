@@ -8,6 +8,7 @@ export interface VanApiErrorDetails {
 export interface VanApiClientOptions {
   apiKey?: string;
   appName?: string;
+  bearerToken?: string;
   baseURL?: string;
   timeoutMs?: number;
   maxRetries?: number;
