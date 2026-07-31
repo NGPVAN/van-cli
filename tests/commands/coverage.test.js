@@ -8,7 +8,6 @@ const createContributions = require('../../dist/commands/contributions').default
 const createCustomFields = require('../../dist/commands/customFields').default;
 const createDesignations = require('../../dist/commands/designations').default;
 const createTargetedEmails = require('../../dist/commands/targetedEmails').default;
-const createEventTypes = require('../../dist/commands/eventTypes').default;
 const createEvents = require('../../dist/commands/events').default;
 const createExportJobs = require('../../dist/commands/exportJobs').default;
 const createLocations = require('../../dist/commands/locations').default;
@@ -64,9 +63,9 @@ describe('command modules broad coverage', () => {
     await survey.list({ top: 5, skip: 1 });
     await survey.get(99);
 
-    const eventTypes = createEventTypes(client);
-    await eventTypes.list({ top: 10, skip: 2 });
-    await eventTypes.get(7);
+    const eventTypes = createEvents(client);
+    await eventTypes.listEventTypes({ top: 10, skip: 2 });
+    await eventTypes.getEventType(7);
 
     const apiKeyProfiles = createApiKeyProfiles(client);
     await apiKeyProfiles.get();
@@ -117,15 +116,10 @@ describe('command modules broad coverage', () => {
     await lists.get(1, { $expand: 'people' });
 
     const targets = createTargets(client);
-    await targets.list({ top: 50, skip: 2, targetType: 'Voter', name: 'Target' });
+    await targets.list({ top: 50, skip: 2, status: 'Ready', type: 'Static' });
     await targets.get(2);
-    await targets.create({ name: 'T1', targetType: 'Voter' });
-    await targets.update(2, { name: 'T2' });
-    await targets.delete(2);
-    await targets.getPeople(2, { top: 10, skip: 1 });
-    await targets.addPerson(2, 100, { sourceCodeId: 1 });
-    await targets.removePerson(2, 100);
-    await targets.getAll({ targetType: 'Voter' }, 200);
+    await targets.subgroups({ targetId: 2 });
+    await targets.subgroups({ targetId: 2, minivanFormats: true });
 
     const groups = createSupporterGroups(client);
     await groups.list({ top: 20, skip: 1 });
@@ -231,7 +225,6 @@ describe('command modules broad coverage', () => {
     await expect(createCanvassResponses(client).create({})).rejects.toThrow(/vanId/);
     await expect(createLocations(client).create({})).rejects.toThrow(/name/);
     await expect(createLocations(client).findOrCreate({})).rejects.toThrow(/name/);
-    await expect(createTargets(client).create({ targetType: 'Voter' })).rejects.toThrow(/name/);
     await expect(createSupporterGroups(client).create({})).rejects.toThrow(/name/);
   });
 
