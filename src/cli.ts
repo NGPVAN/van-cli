@@ -1,4 +1,4 @@
-import { Command, program } from 'commander';
+import { Command, program, Option } from 'commander';
 import chalk from 'chalk';
 import { version } from '../package.json';
 import { VanApiError } from './errors';
@@ -33,7 +33,6 @@ import createCustomFields from './commands/customFields';
 import createDesignations from './commands/designations';
 import createTargetedEmails from './commands/targetedEmails';
 import createEvents from './commands/events';
-import createEventTypes from './commands/eventTypes';
 import createExportJobs from './commands/exportJobs';
 import createLocations from './commands/locations';
 import createNotes from './commands/notes';
@@ -43,6 +42,7 @@ import createScores from './commands/scores';
 import createSignups from './commands/signups';
 import createSupporterGroups from './commands/supporterGroups';
 import createSurveyQuestions from './commands/surveyQuestions';
+import createTargets from './commands/targets';
 
 // Exit code taxonomy so scripts/agents can branch without parsing message text.
 const EXIT_API_ERROR = 1;
@@ -1277,6 +1277,26 @@ eventsCmd
     }, program.opts());
   });
 
+eventsCmd
+  .command('event-types [eventTypeId]')
+  .description('List all event types, or get a specific event type by ID')
+  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
+  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .action(async (eventTypeId, options) => {
+    try {
+      const api = createEvents(await getClient());
+      if (eventTypeId) {
+        validatePositiveInt(eventTypeId, 'eventTypeId');
+        outputResult(await api.getEventType(eventTypeId), program.opts());
+      } else {
+        const types = await api.listEventTypes(options);
+        outputResult(types, program.opts());
+      }
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
 // --- Saved Lists ---
 
 const savedListsCmd = program
@@ -1994,40 +2014,6 @@ changedEntityExportCmd
     }
   });
 
-// --- Event Types ---
-
-const eventTypesCmd = program
-  .command('event-types')
-  .description('Manage event types');
-
-eventTypesCmd
-  .command('list')
-  .description('List event types')
-  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
-  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .action(async (options) => {
-    try {
-      const api = createEventTypes(await getClient());
-      const types = await api.list(options);
-      outputResult(types, program.opts());
-    } catch (error) {
-      handleError(error);
-    }
-  });
-
-eventTypesCmd
-  .command('get <eventTypeId>')
-  .description('Get an event type by ID')
-  .action(async (eventTypeId) => {
-    try {
-      validatePositiveInt(eventTypeId, 'eventTypeId');
-      const api = createEventTypes(await getClient());
-      outputResult(await api.get(eventTypeId), program.opts());
-    } catch (error) {
-      handleError(error);
-    }
-  });
-
 // --- Supporter Groups ---
 
 const supporterGroupsCmd = program
@@ -2125,6 +2111,69 @@ supporterGroupsCmd
       const api = createSupporterGroups(await getClient());
       const result = await api.removePerson(supporterGroupId, vanId);
       outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+  
+// --- Targets ---
+
+const targetsCmd = program
+  .command('targets')
+  .description('Manage targets');
+
+targetsCmd
+  .command('list')
+  .description('List targets (Use --with-subgroups for expanded view)')
+  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
+  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .addOption(
+    new Option('-s, --status <status>', 'Filter by target status')
+      .choices(['Any', 'Setup', 'Ready', 'Active'])
+      .default('Any')
+  )
+  .addOption(
+    new Option('-t, --type <type>', 'Filter by target type')
+      .choices(['Static', 'Dynamic'])
+  )
+  .option('--with-subgroups', 'Include expanded subgroups view')
+  .action(async (options) => {
+    try {
+      const api = createTargets(await getClient());
+      outputResult(await api.list(options), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+targetsCmd
+  .command('get <targetId>')
+  .description('Get a target by ID')
+  .action(async (targetId, options) => {
+    try {
+      validatePositiveInt(targetId, 'targetId');
+      const api = createTargets(await getClient());
+      outputResult(await api.get(targetId), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+targetsCmd
+  .command('subgroups')
+  .description('List generic subgroups, or target-specific ones via flags')
+  .option('--target-id <targetId>', 'Restrict to subgroups of a specific target')
+  .option('--minivan-formats', 'Get subgroups formatted for miniVAN (requires --target-id)')
+  .action(async (options) => {
+    try {
+      if (options.targetId) {
+        validatePositiveInt(options.targetId, 'targetId');
+      } else if (options.minivanFormats) {
+        emitError(EXIT_VALIDATION_ERROR, 'ValidationError', '--minivan-formats requires --target-id to be specified.');
+      }
+      const api = createTargets(await getClient());
+      outputResult(await api.subgroups(options), program.opts());
     } catch (error) {
       handleError(error);
     }

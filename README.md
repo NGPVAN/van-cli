@@ -176,7 +176,7 @@ The CLI currently implements a subset of SDK methods:
 - `people`: `expand-fields`, `get`, `list`, `quick-search`, `find-or-create`, `create`, `update`, `delete`
 - `activist-codes`: `list`, `get`
 - `survey-questions`: `list`, `get`
-- `events`: `list`, `expand-fields`, `get`, `create`, `update`, `delete`
+- `events`: `list`, `expand-fields`, `get`, `create`, `update`, `delete`, `event-types`
 - `saved-lists`: `list`, `get`
 - `export-jobs`: `create`
 - `canvass-responses`: `create`, `list`, `input-types`, `result-codes`, `contact-types`
@@ -190,8 +190,8 @@ The CLI currently implements a subset of SDK methods:
 - `targeted-emails`: `list`, `get`
 - `bulk-import`: `list`
 - `changed-entity-exports`: `list`, `create`
-- `event-types`: `list`, `get`
 - `supporter-groups`: `list`, `get`, `create`, `add-person`, `remove-person`, `delete`
+- `targets`: `list`, `get`, `subgroup`
 - `api-key-profiles`
 
 ## Robustness features
