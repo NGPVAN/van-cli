@@ -158,7 +158,7 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 - `notes`: `list`, `get`, `create`, `update`, `delete`, `categories`
 - `scores`: `list`, `get`, `getAll`, `apply`, `getByPerson`, `update`, `remove`
 - `customFields`: `list`, `get`, `getAll`, `setValue`, `getByPerson`, `updateValue`, `removeValue`
-- `codes`: `list`, `listResultCodes`, `getResultCode`, `listContactTypes`, `getContactType`, `listInputTypes`, `getInputType`, `listSupporterGroups`, `getSupporterGroup`, `getAllResultCodes`, `getAllContactTypes`
+- `codes`: `supportedEntities`, `list`, `get`, `isDuplicateName`, `create`, `update`, `delete`
 - `targets`: `list`, `get`, `create`, `update`, `delete`, `getPeople`, `addPerson`, `removePerson`, `getAll`
 - `stories`: `list`, `get`, `create`, `update`, `delete`, `getByPerson`, `getAll`
 - `targetedEmails`: `list`, `get`
@@ -181,6 +181,7 @@ The CLI currently implements a subset of SDK methods:
 - `export-jobs`: `create`
 - `canvass-responses`: `create`, `list`, `input-types`, `result-codes`, `contact-types`
 - `notes`: `list`, `get`, `create`, `update`, `delete`, `categories`
+- `codes`: `list`, `get`, `supported-entities`, `is-duplicate-name`, `create`, `update`, `delete`, `expand-fields`
 - `contributions`: `list`, `get`, `create`, `update`
 - `designations`: `expand-fields`, `list`, `get`
 - `signups`: `list`, `create`, `update`, `delete`

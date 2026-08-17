@@ -28,6 +28,7 @@ import createApiKeyProfiles from './commands/apiKeyProfiles';
 import createBulkImport from './commands/bulkImport';
 import createCanvassResponses from './commands/canvassResponses';
 import createChangedEntityExportJobs from './commands/changedEntityExportJobs';
+import createCodes from './commands/codes';
 import createContributions from './commands/contributions';
 import createCustomFields from './commands/customFields';
 import createDesignations from './commands/designations';
@@ -305,6 +306,23 @@ const DESIGNATIONS_GET_EXPANDS = [
   'attributionTypes',
   'bankAccounts',
   'disclosureFields'
+];
+
+// Valid $expand values for GET /codes endpoint.
+const CODES_LIST_EXPANDS = [
+  'supportedEntities'
+];
+
+// Valid $expand values for GET /codes/{codeId} endpoint.
+const CODES_GET_EXPANDS = [
+  'directResponsePlanDetails',
+  'glFundDetails',
+  'generalLedgerFund',
+  'costCenter',
+  'revenueStream',
+  'directResponsePlan',
+  'mailMergeTemplate',
+  'supportedEntities'
 ];
 
 // --- Utility functions ---
@@ -1088,6 +1106,182 @@ activistCodesCmd
     } catch (error) {
       handleError(error);
     }
+  });
+
+// --- Codes ---
+
+const codesCmd = program
+  .command('codes')
+  .description('Manage codes (source codes and tags)');
+
+codesCmd
+  .command('list')
+  .description('List/search codes')
+  .option('--name <name>', 'Filter by name')
+  .option('--parentCodeId <id>', 'Filter by parent code ID', parseInt)
+  .option('--entityType <id>', 'Filter by entity type ID (EntityTypes table)')
+  .addOption(new Option('--codeType <type>', 'Filter by code type').choices(['SourceCode', 'Tag']))
+  .option('--supportedEntities <names>', 'Comma-separated entity type names to filter by')
+  .option('--orderby <expr>', 'OData $orderby expression (supports dateModified)')
+  .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van codes expand-fields')
+  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
+  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .action(async (options) => {
+    try {
+      const listOptions: Record<string, unknown> = {
+        top: options.top,
+        skip: options.skip
+      };
+
+      if (options.name) listOptions.name = options.name;
+      if (options.parentCodeId) listOptions.parentCodeId = options.parentCodeId;
+      if (options.entityType) listOptions.entityType = options.entityType;
+      if (options.codeType) listOptions.codeType = options.codeType;
+      if (options.supportedEntities) listOptions.supportedEntities = options.supportedEntities.split(',').map((s: string) => s.trim());
+      if (options.orderby) listOptions.orderby = options.orderby;
+      if (options.expand) listOptions.expand = options.expand;
+
+      const api = createCodes(await getClient());
+      outputResult(await api.list(listOptions), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+codesCmd
+  .command('get <codeId>')
+  .description('Get a code by ID')
+  .option('-e, --expand <fields>', 'Expand related fields (comma-separated). See: van codes expand-fields')
+  .action(async (codeId, options) => {
+    try {
+      validatePositiveInt(codeId, 'codeId');
+      const api = createCodes(await getClient());
+      outputResult(await api.get(codeId, options.expand ? { expand: options.expand } : {}), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+codesCmd
+  .command('supported-entities')
+  .description('List entity type names supported for codeType=Tag')
+  .action(async () => {
+    try {
+      const api = createCodes(await getClient());
+      outputResult(await api.supportedEntities(), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+codesCmd
+  .command('is-duplicate-name')
+  .description('Check whether a code name is already in use')
+  .requiredOption('-n, --name <name>', 'Name to check')
+  .addOption(new Option('--codeType <type>', 'Code type to check against (default: SourceCode)').choices(['SourceCode', 'Tag']))
+  .action(async (options) => {
+    try {
+      const api = createCodes(await getClient());
+      outputResult(await api.isDuplicateName(options.name, options.codeType ? { codeType: options.codeType } : {}), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+codesCmd
+  .command('create')
+  .description('Create a new code')
+  .requiredOption('-n, --name <name>', 'Code name (max 50 chars)')
+  .option('-d, --description <text>', 'Code description (max 200 chars)')
+  .option('--parentCodeId <id>', 'Parent code ID (must be an existing code of the same codeType)', parseInt)
+  .addOption(new Option('--codeType <type>', 'Code type (default: SourceCode)').choices(['SourceCode', 'Tag']))
+  .option('--supportedEntities <json>', 'JSON array of {name, isSearchable, isApplicable} (required if codeType is Tag)')
+  .option('--campaignId <id>', 'Campaign ID (SourceCode only)', parseInt)
+  .option('--contactTypeId <id>', 'Contact type ID (SourceCode only)', parseInt)
+  .option('--revenueStreamId <id>', 'Revenue stream ID (SourceCode only)', parseInt)
+  .option('--mailMergeTemplateId <id>', 'Mail merge template ID (SourceCode only)', parseInt)
+  .option('--generalLedgerFundId <id>', 'General ledger fund ID (SourceCode only)', parseInt)
+  .option('--costCenterId <id>', 'Cost center ID (SourceCode only)', parseInt)
+  .action(async (options) => {
+    try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+      const data: Record<string, unknown> = {
+        name: merged.name
+      };
+
+      if (merged.description !== undefined) data.description = merged.description;
+      if (merged.parentCodeId !== undefined) data.parentCodeId = merged.parentCodeId;
+      if (merged.codeType !== undefined) data.codeType = merged.codeType;
+      if (merged.supportedEntities) data.supportedEntities = JSON.parse(merged.supportedEntities as string);
+      if (merged.campaignId !== undefined) data.campaignId = merged.campaignId;
+      if (merged.contactTypeId !== undefined) data.contactTypeId = merged.contactTypeId;
+      if (merged.revenueStreamId !== undefined) data.revenueStreamId = merged.revenueStreamId;
+      if (merged.mailMergeTemplateId !== undefined) data.mailMergeTemplateId = merged.mailMergeTemplateId;
+      if (merged.generalLedgerFundId !== undefined) data.generalLedgerFundId = merged.generalLedgerFundId;
+      if (merged.costCenterId !== undefined) data.costCenterId = merged.costCenterId;
+
+      const api = createCodes(await getClient());
+      outputResult(await api.create(data), globalOpts);
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+codesCmd
+  .command('update <codeId>')
+  .description('Update a code by ID (fetches existing code then applies specified changes)')
+  .option('-n, --name <name>', 'Code name (max 50 chars)')
+  .option('--parentCodeId <id>', 'Parent code ID (must be an existing code of the same codeType)', parseInt)
+  .action(async (codeId, options) => {
+    try {
+      validatePositiveInt(codeId, 'codeId');
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+      const data: Record<string, unknown> = {};
+
+      if (merged.name !== undefined) data.name = merged.name;
+      if (merged.parentCodeId !== undefined) data.parentCodeId = merged.parentCodeId;
+
+      const api = createCodes(await getClient());
+      outputResult(await api.update(codeId, data), globalOpts);
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+codesCmd
+  .command('delete <codeId>')
+  .description('Delete a code by ID')
+  .action(async (codeId) => {
+    try {
+      validatePositiveInt(codeId, 'codeId');
+      const api = createCodes(await getClient());
+      const result = await api.delete(codeId);
+      outputResult(result, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+codesCmd
+  .command('expand-fields')
+  .description('List $expand fields for codes endpoints')
+  .action(() => {
+    outputResult({
+      resource: 'codes',
+      endpointExpandFields: {
+        '/codes': CODES_LIST_EXPANDS,
+        '/codes/{codeId}': CODES_GET_EXPANDS
+      },
+      notes: [
+        'Some expansions are endpoint and permission dependent.',
+        'If an expand is invalid for your context, VAN returns an INVALID_PARAMETER with accepted values.'
+      ],
+      sources: [
+        'https://docs.ngpvan.com/reference/codes'
+      ]
+    }, program.opts());
   });
 
 // --- Survey Questions ---

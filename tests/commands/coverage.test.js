@@ -202,17 +202,13 @@ describe('command modules broad coverage', () => {
     await scores.remove(100, 9);
 
     const codes = createCodes(client);
-    await codes.list({ top: 10, skip: 1 });
-    await codes.listResultCodes({ top: 10, skip: 1 });
-    await codes.getResultCode(1);
-    await codes.listContactTypes({ top: 10, skip: 1 });
-    await codes.getContactType(2);
-    await codes.listInputTypes({ top: 10, skip: 1 });
-    await codes.getInputType(3);
-    await codes.listSupporterGroups({ top: 10, skip: 1 });
-    await codes.getSupporterGroup(4);
-    await codes.getAllResultCodes(200);
-    await codes.getAllContactTypes(200);
+    await codes.list({ top: 10, skip: 1, name: 'Foo', parentCodeId: 1, entityType: '2', codeType: 'SourceCode', supportedEntities: ['Contact'], orderby: 'dateModified', expand: 'supportedEntities' });
+    await codes.get(1, { expand: 'supportedEntities' });
+    await codes.supportedEntities();
+    await codes.isDuplicateName('Foo', { codeType: 'SourceCode' });
+    await codes.create({ name: 'Foo', description: 'desc', parentCodeId: 2, codeType: 'SourceCode', campaignId: 5, contactTypeId: 6, revenueStreamId: 7, mailMergeTemplateId: 8, generalLedgerFundId: 9, costCenterId: 10 });
+    await codes.update(1, { name: 'Bar', parentCodeId: 2 });
+    await codes.delete(1);
   });
 
   test('validation branches for required fields', async () => {
@@ -226,6 +222,7 @@ describe('command modules broad coverage', () => {
     await expect(createLocations(client).create({})).rejects.toThrow(/name/);
     await expect(createLocations(client).findOrCreate({})).rejects.toThrow(/name/);
     await expect(createSupporterGroups(client).create({})).rejects.toThrow(/name/);
+    await expect(createCodes(client).create({})).rejects.toThrow(/name/);
   });
 
   test('ensures core client methods exercised', () => {
