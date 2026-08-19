@@ -77,6 +77,14 @@ function emitError(code: number, type: string, message: string, extra: Record<st
   throw new CliExit(code);
 }
 
+// For usage mistakes (bad/missing arguments) caught in an action handler before any request
+// is attempted — mirrors Commander's own "error: <message>" style (e.g. "unknown command",
+// "required option ... not specified") so hand-rolled checks read the same as Commander's.
+function emitUsageError(message: string): never {
+  console.error(`error: ${message}`);
+  throw new CliExit(EXIT_VALIDATION_ERROR);
+}
+
 // Resolve API key from: --profile flag > VAN_PROFILE env > VAN_API_KEY env > config [default]
 // Deferred until getClient() so --profile flag is available after parsing.
 function resolveProfile(): { apiKey: string; appName?: string } | null {
@@ -913,6 +921,7 @@ peopleCmd
         top: merged.top,
         skip: merged.skip
       };
+      const defaultCriteriaKeyCount = Object.keys(criteria).length;
 
       if (merged.firstName) criteria.firstName = merged.firstName;
       if (merged.lastName) criteria.lastName = merged.lastName;
@@ -932,6 +941,10 @@ peopleCmd
       if (merged.contactMode) criteria.contactMode = merged.contactMode;
       if (merged.orderby) criteria.$orderby = merged.orderby;
       if (merged.expand) criteria.$expand = merged.expand;
+
+      if (Object.keys(criteria).length === defaultCriteriaKeyCount) {
+        emitUsageError('This endpoint requires at least one search parameter, such as --firstName, --lastName, or --email.');
+      }
 
       const api = createPeople(await getClient());
       const results = await api.list(criteria);
@@ -1999,7 +2012,7 @@ const scoresCmd = program
 
 scoresCmd
   .command('list')
-  .description('List score types')
+  .description('List scores')
   .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
@@ -2013,16 +2026,26 @@ scoresCmd
   });
 
 scoresCmd
-  .command('apply')
-  .description('Apply a score to a person')
-  .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
-  .requiredOption('-s, --scoreId <id>', 'Score type ID', parseInt)
-  .requiredOption('--value <value>', 'Score value', parseFloat)
-  .action(async (options) => {
+  .command('get <scoreId>')
+  .description('Get a score by ID')
+  .action(async (scoreId) => {
     try {
+      validatePositiveInt(scoreId, 'scoreId');
       const api = createScores(await getClient());
-      const result = await api.apply(options.vanId, options.scoreId, options.value);
-      outputResult(result, program.opts());
+      outputResult(await api.get(scoreId), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+scoresCmd
+  .command('get-by-person <vanId>')
+  .description('List scores assigned to a person')
+  .action(async (vanId) => {
+    try {
+      validatePositiveInt(vanId, 'vanId');
+      const api = createScores(await getClient());
+      outputResult(await api.getByPerson(vanId), program.opts());
     } catch (error) {
       handleError(error);
     }
