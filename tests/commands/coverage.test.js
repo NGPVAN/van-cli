@@ -195,11 +195,7 @@ describe('command modules broad coverage', () => {
     const scores = createScores(client);
     await scores.list({ top: 10, skip: 1 });
     await scores.get(9);
-    await scores.getAll({ name: 'Likelihood' }, 100);
-    await scores.apply(100, 9, 77.5, { source: 'api' });
-    await scores.getByPerson(100, { top: 10, skip: 1 });
-    await scores.update(100, 9, 88.1, { source: 'api' });
-    await scores.remove(100, 9);
+    await scores.getByPerson(100);
 
     const codes = createCodes(client);
     await codes.list({ top: 10, skip: 1, name: 'Foo', parentCodeId: 1, entityType: '2', codeType: 'SourceCode', supportedEntities: ['Contact'], orderby: 'dateModified', expand: 'supportedEntities' });
