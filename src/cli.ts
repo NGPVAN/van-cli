@@ -41,6 +41,7 @@ import createPeople from './commands/people';
 import createSavedLists from './commands/savedLists';
 import createScores from './commands/scores';
 import createSignups from './commands/signups';
+import createStories from './commands/stories';
 import createSupporterGroups from './commands/supporterGroups';
 import createSurveyQuestions from './commands/surveyQuestions';
 import createTargets from './commands/targets';
@@ -2046,6 +2047,57 @@ scoresCmd
       validatePositiveInt(vanId, 'vanId');
       const api = createScores(await getClient());
       outputResult(await api.getByPerson(vanId), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+  // --- Stories ---
+
+const storiesCmd = program
+  .command('stories')
+  .description('Manage stories');
+
+storiesCmd
+  .command('get <storyId>')
+  .description('Get a story by ID')
+  .action(async (storyId) => {
+    try {
+      validatePositiveInt(storyId, 'storyId');
+      const api = createStories(await getClient());
+      outputResult(await api.get(storyId), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+storiesCmd
+  .command('create')
+  .description('Create a new story')
+  .requiredOption('-v, --vanId <id>', 'Person VAN ID', parseInt)
+  .requiredOption('--title <title>', 'Story title')
+  .requiredOption('-t, --storyText <text>', 'Story text')
+  .requiredOption('--storyStatusId <id>', 'Story status ID', parseInt)
+  .option('--tags <codeIds>', 'Comma-separated tag code IDs to apply to the story (example: 101,102)')
+  .option('--campaignId <id>', 'Campaign ID', parseInt)
+  .action(async (options) => {
+    try {
+      const globalOpts = program.opts();
+      const merged = mergeJsonOption(options, globalOpts);
+      const data: Record<string, unknown> = {
+        vanId: merged.vanId,
+        title: merged.title,
+        storyText: merged.storyText,
+        storyStatusId: merged.storyStatusId,
+      };
+      if (merged.tags) {
+        data.tags = (merged.tags as string).split(',').map(id => ({ codeId: parseInt(id.trim(), 10) }));
+      }
+      if (merged.campaignId !== undefined) data.campaignId = merged.campaignId;
+
+      const api = createStories(await getClient());
+      const story = await api.create(data);
+      outputResult(story, globalOpts);
     } catch (error) {
       handleError(error);
     }

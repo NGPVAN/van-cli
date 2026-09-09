@@ -38,7 +38,7 @@ describe('command module wiring tests', () => {
     await createNotes(client).create(4, { text: 'note' });
     await createScores(client).getByPerson(3);
     await createTargets(client).list({ targetType: 'Voter' });
-    await createStories(client).create({ vanId: 1, text: 'story' });
+    await createStories(client).create({ vanId: 1, title: 'Story', storyText: 'story', storyStatusId: 1 });
     await createTargetedEmails(client).list({ top: 10, skip: 0 });
     await createBulkImport(client).createJob({ name: 'Import 1', importType: 'People', mappings: { firstName: 'First Name' } });
     await createChangedEntityExportJobs(client).create({ dateChangedFrom: '2026-01-01' });

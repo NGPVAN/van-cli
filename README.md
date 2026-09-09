@@ -160,7 +160,7 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 - `customFields`: `list`, `get`, `getAll`, `setValue`, `getByPerson`, `updateValue`, `removeValue`
 - `codes`: `supportedEntities`, `list`, `get`, `isDuplicateName`, `create`, `update`, `delete`
 - `targets`: `list`, `get`, `create`, `update`, `delete`, `getPeople`, `addPerson`, `removePerson`, `getAll`
-- `stories`: `list`, `get`, `create`, `update`, `delete`, `getByPerson`, `getAll`
+- `stories`: `get`, `create`
 - `targetedEmails`: `list`, `get`
 - `bulkImport`: `list`, `listJobs`, `getJob`, `createJob`, `uploadData`, `startJob`, `cancelJob`, `getJobResults`, `getJobErrors`, `getAllJobs`
 - `changedEntityExportJobs`: `list`, `get`, `create`, `getDownloadUrl`, `cancel`, `getStatus`, `getAll`
@@ -186,6 +186,7 @@ The CLI currently implements a subset of SDK methods:
 - `designations`: `expand-fields`, `list`, `get`
 - `signups`: `list`, `create`, `update`, `delete`
 - `scores`: `list`, `get`, `get-by-person`
+- `stories`: `get`, `create`
 - `custom-fields`: `list`
 - `locations`: `list`, `get`, `create`, `find-or-create`, `delete`
 - `targeted-emails`: `list`, `get`
