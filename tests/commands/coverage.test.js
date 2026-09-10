@@ -26,12 +26,12 @@ describe('command modules broad coverage', () => {
 
   beforeEach(() => {
     client = {
-      get: jest.fn().mockResolvedValue({ items: [] }),
-      post: jest.fn().mockResolvedValue({ id: 1 }),
-      put: jest.fn().mockResolvedValue({ id: 1 }),
-      delete: jest.fn().mockResolvedValue({ ok: true }),
-      getAllPaginated: jest.fn().mockResolvedValue([]),
-      getPaginated: jest.fn().mockResolvedValue({ items: [] }),
+      get: vi.fn().mockResolvedValue({ items: [] }),
+      post: vi.fn().mockResolvedValue({ id: 1 }),
+      put: vi.fn().mockResolvedValue({ id: 1 }),
+      delete: vi.fn().mockResolvedValue({ ok: true }),
+      getAllPaginated: vi.fn().mockResolvedValue([]),
+      getPaginated: vi.fn().mockResolvedValue({ items: [] }),
     };
   });
 

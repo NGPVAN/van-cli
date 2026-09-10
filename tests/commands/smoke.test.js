@@ -19,11 +19,11 @@ describe('command module wiring tests', () => {
 
   beforeEach(() => {
     client = {
-      get: jest.fn().mockResolvedValue({ items: [] }),
-      post: jest.fn().mockResolvedValue({ id: 1 }),
-      put: jest.fn().mockResolvedValue({ id: 1 }),
-      delete: jest.fn().mockResolvedValue({}),
-      getAllPaginated: jest.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue({ items: [] }),
+      post: vi.fn().mockResolvedValue({ id: 1 }),
+      put: vi.fn().mockResolvedValue({ id: 1 }),
+      delete: vi.fn().mockResolvedValue({}),
+      getAllPaginated: vi.fn().mockResolvedValue([]),
     };
   });
 
