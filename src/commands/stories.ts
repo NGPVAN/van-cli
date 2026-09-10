@@ -25,7 +25,7 @@ const create = function(client: VanApiClientLike) {
      * @param {string} storyData.title - Story title (required)
      * @param {string} storyData.storyText - Story text (required)
      * @param {number} storyData.storyStatusId - Story status ID (required)
-     * @param {Object[]} storyData.tags - Tag objects to apply, e.g. [{codeId, codeName}]
+     * @param {Object[]} storyData.tags - Tag objects to apply; only codeId is required per tag, e.g. [{codeId}]
      * @param {number} storyData.campaignId - Campaign ID
      * @returns {Promise<Object>} Created story object
      */
@@ -53,8 +53,12 @@ const create = function(client: VanApiClientLike) {
       if (storyData.tags !== undefined) body.tags = storyData.tags;
       if (storyData.campaignId !== undefined) body.campaignId = storyData.campaignId;
 
-      // The POST response only includes the correct storyId, so we need a follow-up GET to return the actual created entity.
+      // The POST response only includes the correct storyId (other fields come back null/zeroed),
+      // so a follow-up GET is required to return the actual created entity.
       const created = await client.post('/stories', body);
+      if (!created?.storyId) {
+        throw new Error('Story creation response did not include a storyId');
+      }
       return this.get(created.storyId);
     },
   };

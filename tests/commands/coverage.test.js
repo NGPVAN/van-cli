@@ -102,6 +102,7 @@ describe('command modules broad coverage', () => {
 
     const stories = createStories(client);
     await stories.get(30);
+    client.post.mockResolvedValueOnce({ storyId: 30 });
     await stories.create({
       vanId: 100, title: 'Story', storyText: 'Body', storyStatusId: 1,
       tags: [{ codeId: 101, codeName: 'Volunteer' }], campaignId: 5,
@@ -229,6 +230,20 @@ describe('command modules broad coverage', () => {
 
     expect(client.get).toHaveBeenCalledWith('/stories/389');
     expect(result).toEqual(expect.objectContaining({ storyId: 389, title: 'Story', storyText: 'Body' }));
+  });
+
+  test('stories create throws explicitly instead of GETing /stories/undefined on an empty POST response', async () => {
+    client.post.mockResolvedValueOnce(null);
+    await expect(createStories(client).create({ vanId: 100, title: 'Story', storyText: 'Body', storyStatusId: 1 }))
+      .rejects.toThrow(/storyId/);
+    expect(client.get).not.toHaveBeenCalled();
+  });
+
+  test('stories create throws explicitly when the POST response omits storyId', async () => {
+    client.post.mockResolvedValueOnce({ title: null });
+    await expect(createStories(client).create({ vanId: 100, title: 'Story', storyText: 'Body', storyStatusId: 1 }))
+      .rejects.toThrow(/storyId/);
+    expect(client.get).not.toHaveBeenCalled();
   });
 
   test('ensures core client methods exercised', () => {

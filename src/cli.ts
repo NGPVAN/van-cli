@@ -445,6 +445,14 @@ function validateNonemptyString(value: string, label: string): string {
   return value;
 }
 
+// Parses a --tags option value into API-ready tag objects. Accepts a comma-separated string of
+// code IDs (the CLI's own on-the-wire shape), or an array of IDs when supplied via --json.
+export function parseTagsOption(tags: unknown): Array<{ codeId: number }> | undefined {
+  if (!tags) return undefined;
+  const tagIds = Array.isArray(tags) ? tags : String(tags).split(',');
+  return tagIds.map(id => ({ codeId: validatePositiveInt(String(id).trim(), 'tags') }));
+}
+
 function validateDate(value: string, label: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must be a valid date in YYYY-MM-DD format, got: "${value}"`);
@@ -2052,7 +2060,7 @@ scoresCmd
     }
   });
 
-  // --- Stories ---
+// --- Stories ---
 
 const storiesCmd = program
   .command('stories')
@@ -2063,9 +2071,9 @@ storiesCmd
   .description('Get a story by ID')
   .action(async (storyId) => {
     try {
-      validatePositiveInt(storyId, 'storyId');
+      const id = validatePositiveInt(storyId, 'storyId');
       const api = createStories(await getClient());
-      outputResult(await api.get(storyId), program.opts());
+      outputResult(await api.get(id), program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -2090,9 +2098,7 @@ storiesCmd
         storyText: merged.storyText,
         storyStatusId: merged.storyStatusId,
       };
-      if (merged.tags) {
-        data.tags = (merged.tags as string).split(',').map(id => ({ codeId: parseInt(id.trim(), 10) }));
-      }
+      if (merged.tags) data.tags = parseTagsOption(merged.tags);
       if (merged.campaignId !== undefined) data.campaignId = merged.campaignId;
 
       const api = createStories(await getClient());
