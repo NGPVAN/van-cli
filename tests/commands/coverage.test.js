@@ -101,13 +101,12 @@ describe('command modules broad coverage', () => {
     await notes.delete(100, 20);
 
     const stories = createStories(client);
-    await stories.list({ top: 10, skip: 1, vanId: 100 });
     await stories.get(30);
-    await stories.create({ vanId: 100, title: 'Story', text: 'Body' });
-    await stories.update(30, { title: 'Story2' });
-    await stories.delete(30);
-    await stories.getByPerson(100, { top: 10, skip: 1 });
-    await stories.getAll({ vanId: 100 }, 1000);
+    client.post.mockResolvedValueOnce({ storyId: 30 });
+    await stories.create({
+      vanId: 100, title: 'Story', storyText: 'Body', storyStatusId: 1,
+      tags: [{ codeId: 101, codeName: 'Volunteer' }], campaignId: 5,
+    });
   });
 
   test('saved lists / targets / supporter groups', async () => {
@@ -212,13 +211,39 @@ describe('command modules broad coverage', () => {
     await expect(createContributions(client).create({ vanId: 1, amount: 5 })).rejects.toThrow(/dateReceived/);
     await expect(createNotes(client).create({ vanId: 1 })).rejects.toThrow(/text/);
     await expect(createSignups(client).create({ eventId: 1 })).rejects.toThrow(/vanId/);
-    await expect(createStories(client).create({ vanId: 1 })).rejects.toThrow(/title|text/);
+    await expect(createStories(client).create({ vanId: 1 })).rejects.toThrow(/title/);
+    await expect(createStories(client).create({ vanId: 1, title: 'Story' })).rejects.toThrow(/storyText/);
+    await expect(createStories(client).create({ vanId: 1, title: 'Story', storyText: 'Body' })).rejects.toThrow(/storyStatusId/);
     await expect(createBulkImport(client).createJob({ importType: 'People' })).rejects.toThrow(/name/);
     await expect(createCanvassResponses(client).create({})).rejects.toThrow(/vanId/);
     await expect(createLocations(client).create({})).rejects.toThrow(/name/);
     await expect(createLocations(client).findOrCreate({})).rejects.toThrow(/name/);
     await expect(createSupporterGroups(client).create({})).rejects.toThrow(/name/);
     await expect(createCodes(client).create({})).rejects.toThrow(/name/);
+  });
+
+  test('stories create fetches the created story instead of trusting the POST echo', async () => {
+    client.post.mockResolvedValueOnce({ storyId: 389, title: null, storyText: null, vanId: 0, storyStatus: null, tags: null, campaignId: null });
+    client.get.mockResolvedValueOnce({ storyId: 389, title: 'Story', storyText: 'Body', vanId: 100, storyStatus: { storyStatusId: 1, statusName: 'Open' }, tags: null, campaignId: null });
+
+    const result = await createStories(client).create({ vanId: 100, title: 'Story', storyText: 'Body', storyStatusId: 1 });
+
+    expect(client.get).toHaveBeenCalledWith('/stories/389');
+    expect(result).toEqual(expect.objectContaining({ storyId: 389, title: 'Story', storyText: 'Body' }));
+  });
+
+  test('stories create throws explicitly instead of GETing /stories/undefined on an empty POST response', async () => {
+    client.post.mockResolvedValueOnce(null);
+    await expect(createStories(client).create({ vanId: 100, title: 'Story', storyText: 'Body', storyStatusId: 1 }))
+      .rejects.toThrow(/storyId/);
+    expect(client.get).not.toHaveBeenCalled();
+  });
+
+  test('stories create throws explicitly when the POST response omits storyId', async () => {
+    client.post.mockResolvedValueOnce({ title: null });
+    await expect(createStories(client).create({ vanId: 100, title: 'Story', storyText: 'Body', storyStatusId: 1 }))
+      .rejects.toThrow(/storyId/);
+    expect(client.get).not.toHaveBeenCalled();
   });
 
   test('ensures core client methods exercised', () => {
