@@ -96,18 +96,29 @@ export function validateWebhookUrl(value: unknown, label: string): string {
   return value;
 }
 
+// Takes the first two octets of an IPv4 address.
+function isPrivateIPv4(a: number, b: number): boolean {
+  return a === 0 || a === 10 || a === 127 ||
+    (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
 // The URL parser has already normalized IPv4 shorthand (e.g. 2130706433 -> 127.0.0.1) and
-// bracketed IPv6 hosts, so plain pattern checks on the hostname are enough here.
-function isPrivateHostname(hostname: string): boolean {
+// bracketed IPv6 hosts (e.g. [::ffff:127.0.0.1] -> [::ffff:7f00:1]), so pattern checks on the
+// hostname are enough here.
+function isPrivateHostname(rawHostname: string): boolean {
+  // A trailing DNS root dot ("localhost.") names the same host.
+  const hostname = rawHostname.endsWith('.') ? rawHostname.slice(0, -1) : rawHostname;
   const ipv4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(hostname);
-  if (ipv4) {
-    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
-    return a === 0 || a === 10 || a === 127 ||
-      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-  }
+  if (ipv4) return isPrivateIPv4(Number(ipv4[1]), Number(ipv4[2]));
   if (hostname.startsWith('[')) {
     const ipv6 = hostname.slice(1, -1);
-    return ipv6 === '::' || ipv6 === '::1' || ipv6.startsWith('::ffff:') || /^f[cd]/.test(ipv6) || /^fe[89ab]/.test(ipv6);
+    // IPv4-mapped (::ffff:a.b.c.d): judge by the embedded IPv4 address.
+    const mapped = /^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/.exec(ipv6);
+    if (mapped) {
+      const high = parseInt(mapped[1], 16);
+      return isPrivateIPv4(high >> 8, high & 0xff);
+    }
+    return ipv6 === '::' || ipv6 === '::1' || /^f[cd]/.test(ipv6) || /^fe[89ab]/.test(ipv6);
   }
   return hostname === 'localhost' || hostname.endsWith('.localhost');
 }

@@ -1513,17 +1513,20 @@ savedListsCmd
   .option('--maxDoorCount <count>', 'Only lists with at most this many doors')
   .option('--maxPeopleCount <count>', 'Only lists with at most this many people')
   .addOption(new Option('--isFollowed <bool>', 'Filter by whether the list is followed').choices(['true', 'false']))
-  .option('--top <count>', 'Number of results (1-100)', '50')
-  .option('--skip <count>', 'Number of results to skip', '0')
+  // No Commander defaults for top/skip: they would override --json values in mergeJsonOption,
+  // and the SDK already defaults them.
+  .option('--top <count>', 'Number of results (1-100, default: 50)')
+  .option('--skip <count>', 'Number of results to skip (default: 0)')
   .addHelpText('after', `
 Examples:
   $ van saved-lists list --text "Door knock" --top 100
   $ van saved-lists list --folderId 12 --maxDoorCount 500 --isFollowed true`)
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
       const api = createSavedLists(lazyClient);
-      const lists = await api.list(options);
-      outputResult(lists, program.opts());
+      const lists = await api.list(mergeJsonOption(options, globalOpts));
+      outputResult(lists, globalOpts);
     } catch (error) {
       handleError(error);
     }
@@ -1559,16 +1562,18 @@ foldersCmd
   .option('--text <text>', 'Search by folder name')
   .option('--ids <ids>', 'Comma-separated folder IDs to return (e.g. 1,2,3)')
   .option('--writableOnly', 'Only return shared folders others can save into (folders you own are always returned)')
-  .option('--top <count>', 'Number of results (>= 1)', '50')
-  .option('--skip <count>', 'Number of results to skip', '0')
+  // No Commander defaults for top/skip (see saved-lists list).
+  .option('--top <count>', 'Number of results (>= 1, default: 50)')
+  .option('--skip <count>', 'Number of results to skip (default: 0)')
   .addHelpText('after', `
 Examples:
   $ van folders list --text "Field"
   $ van folders list --ids 1,2,3 --writableOnly`)
   .action(async (options) => {
     try {
+      const globalOpts = program.opts();
       const api = createFolders(lazyClient);
-      outputResult(await api.list(options), program.opts());
+      outputResult(await api.list(mergeJsonOption(options, globalOpts)), globalOpts);
     } catch (error) {
       handleError(error);
     }
