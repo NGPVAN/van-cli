@@ -102,8 +102,15 @@ describe('shared validators', () => {
     test.each([
       'https://localhost/hook', 'https://127.0.0.1/hook', 'https://[::1]/hook', 'https://10.0.0.5/hook',
       'https://192.168.1.1/hook', 'https://172.16.0.1/hook', 'https://169.254.169.254/hook',
+      'https://127.0.0.2/hook', 'https://2130706433/hook', 'https://0.0.0.0/hook', 'https://api.localhost/hook',
+      'https://[::ffff:127.0.0.1]/hook', 'https://[fd00::1]/hook', 'https://[fe80::1]/hook',
     ])('rejects private/internal address %p', (value) => {
       expect(() => validateWebhookUrl(value, 'webhookUrl')).toThrow(/private\/internal address/);
     });
+
+    test.each(['https://10.example.com/hook', 'https://172.16.example.com/hook', 'https://[2001:db8::1]/hook'])(
+      'accepts public hostname %p', (value) => {
+        expect(validateWebhookUrl(value, 'webhookUrl')).toBe(value);
+      });
   });
 });

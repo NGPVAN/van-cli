@@ -390,9 +390,11 @@ function outputResult(data: unknown, options: Record<string, unknown> = {}) {
 // Error handler
 
 function handleError(error: unknown): never {
-  if (error instanceof CliExit) {
-    // Already printed by emitError — pass it through unchanged rather than re-wrapping it.
-    throw error;
+  // Already printed by emitError — pass it through unchanged rather than re-wrapping it. SDK methods
+  // that wrap failures (e.g. people.delete) can carry it as a cause, since lazyClient resolves
+  // credentials (and may emit AuthRequired) inside the SDK call.
+  for (let e: unknown = error; e instanceof Error; e = e.cause) {
+    if (e instanceof CliExit) throw e;
   }
   if (error instanceof VanValidationError) {
     // Client-side input validation from an SDK module — same shape and exit code as validatePositiveInt().

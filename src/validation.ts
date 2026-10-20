@@ -90,18 +90,24 @@ export function validateWebhookUrl(value: unknown, label: string): string {
   if (parsed.protocol !== 'https:') {
     throw new VanValidationError(`${label} must use HTTPS`);
   }
-  const hostname = parsed.hostname.toLowerCase();
-  const privatePatterns = ['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'];
-  const privateRanges = ['10.', '192.168.', '169.254.'];
-  if (
-    privatePatterns.includes(hostname) ||
-    privateRanges.some(prefix => hostname.startsWith(prefix)) ||
-    hostname.startsWith('172.') && (() => {
-      const second = parseInt(hostname.split('.')[1], 10);
-      return second >= 16 && second <= 31;
-    })()
-  ) {
+  if (isPrivateHostname(parsed.hostname.toLowerCase())) {
     throw new VanValidationError(`${label} must not point to a private/internal address`);
   }
   return value;
+}
+
+// The URL parser has already normalized IPv4 shorthand (e.g. 2130706433 -> 127.0.0.1) and
+// bracketed IPv6 hosts, so plain pattern checks on the hostname are enough here.
+function isPrivateHostname(hostname: string): boolean {
+  const ipv4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(hostname);
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    return a === 0 || a === 10 || a === 127 ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  if (hostname.startsWith('[')) {
+    const ipv6 = hostname.slice(1, -1);
+    return ipv6 === '::' || ipv6 === '::1' || ipv6.startsWith('::ffff:') || /^f[cd]/.test(ipv6) || /^fe[89ab]/.test(ipv6);
+  }
+  return hostname === 'localhost' || hostname.endsWith('.localhost');
 }
