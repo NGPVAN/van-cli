@@ -1,7 +1,9 @@
 import { Command, program, Option } from 'commander';
 import chalk from 'chalk';
 import { version } from '../package.json';
-import { VanApiError } from './errors';
+import { VanApiError, VanValidationError } from './errors';
+import { validatePositiveInt, validateWebhookUrl } from './validation';
+import type { VanApiClientLike } from './types';
 import { getProfile, checkConfigPermissions } from './config';
 import VanApiClient, { DEFAULT_LOGIN_URL } from './client';
 import { refreshAccessToken, RefreshRejectedError } from './auth';
@@ -35,6 +37,7 @@ import createDesignations from './commands/designations';
 import createTargetedEmails from './commands/targetedEmails';
 import createEvents from './commands/events';
 import createExportJobs from './commands/exportJobs';
+import createFolders from './commands/folders';
 import createLocations from './commands/locations';
 import createNotes from './commands/notes';
 import createPeople from './commands/people';
@@ -250,6 +253,17 @@ async function getClient() {
   return client;
 }
 
+// Defers credential resolution until the first actual request, so SDK input validation always
+// runs (and fails fast with a ValidationError) before any auth lookup, token refresh or prompt.
+const lazyClient: VanApiClientLike = {
+  get: async (...args) => (await getClient()).get(...args),
+  post: async (...args) => (await getClient()).post(...args),
+  put: async (...args) => (await getClient()).put(...args),
+  delete: async (...args) => (await getClient()).delete(...args),
+  getPaginated: async (...args) => (await getClient()).getPaginated(...args),
+  getAllPaginated: async (...args) => (await getClient()).getAllPaginated(...args),
+};
+
 // Valid $expand values for GET /people/{vanId} endpoint.
 const PEOPLE_GET_EXPANDS = [
   'contributionHistory',
@@ -380,6 +394,10 @@ function handleError(error: unknown): never {
     // Already printed by emitError — pass it through unchanged rather than re-wrapping it.
     throw error;
   }
+  if (error instanceof VanValidationError) {
+    // Client-side input validation from an SDK module — same shape and exit code as validatePositiveInt().
+    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', error.message);
+  }
   if (error instanceof VanApiError) {
     emitError(EXIT_API_ERROR, 'VanApiError', error.message, { status: error.status });
   } else if (error instanceof Error) {
@@ -430,14 +448,6 @@ function mergeJsonOption(cliOptions: Record<string, unknown>, globalOpts: Record
   return merged;
 }
 
-function validatePositiveInt(value: string, label: string): number {
-  const num = Number(value);
-  if (!Number.isInteger(num) || num <= 0) {
-    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must be a positive integer, got: "${value}"`);
-  }
-  return num;
-}
-
 function validateNonemptyString(value: string, label: string): string {
   if ((value || "").length < 1) {
     emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must be a valid string: "${value}"`);
@@ -460,32 +470,6 @@ function validateDate(value: string, label: string): string {
   const parsed = new Date(value + 'T00:00:00');
   if (Number.isNaN(parsed.getTime())) {
     emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} is not a valid date: "${value}"`);
-  }
-  return value;
-}
-
-function validateWebhookUrl(value: string, label: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must be a valid URL, got: "${value}"`);
-  }
-  if (parsed.protocol !== 'https:') {
-    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must use HTTPS`);
-  }
-  const hostname = parsed.hostname.toLowerCase();
-  const privatePatterns = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
-  const privateRanges = ['10.', '192.168.', '169.254.'];
-  if (
-    privatePatterns.includes(hostname) ||
-    privateRanges.some(prefix => hostname.startsWith(prefix)) ||
-    hostname.startsWith('172.') && (() => {
-      const second = parseInt(hostname.split('.')[1], 10);
-      return second >= 16 && second <= 31;
-    })()
-  ) {
-    emitError(EXIT_VALIDATION_ERROR, 'ValidationError', `${label} must not point to a private/internal address`);
   }
   return value;
 }
@@ -857,7 +841,7 @@ peopleCmd
   .action(async (vanId, options) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const api = createPeople(await getClient());
+      const api = createPeople(lazyClient);
       const person = await api.get(vanId, options.expand ? { $expand: options.expand } : {});
       outputResult(person, program.opts());
     } catch (error) {
@@ -875,7 +859,7 @@ peopleCmd
       const payload = parseJsonPayload(options);
       const globalOpts = program.opts();
       const merged = globalOpts.json ? { ...parseGlobalJsonPayload(globalOpts), ...payload } : payload;
-      const api = createPeople(await getClient());
+      const api = createPeople(lazyClient);
       const result = await api.update(vanId, merged);
       outputResult(result, globalOpts);
     } catch (error) {
@@ -889,7 +873,7 @@ peopleCmd
   .action(async (vanId) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const api = createPeople(await getClient());
+      const api = createPeople(lazyClient);
       const result = await api.delete(vanId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -955,7 +939,7 @@ peopleCmd
         emitUsageError('This endpoint requires at least one search parameter, such as --firstName, --lastName, or --email.');
       }
 
-      const api = createPeople(await getClient());
+      const api = createPeople(lazyClient);
       const results = await api.list(criteria);
       outputResult(results, globalOpts);
     } catch (error) {
@@ -976,7 +960,7 @@ peopleCmd
 
       if (options.expand) criteria.$expand = options.expand;
 
-      const api = createPeople(await getClient());
+      const api = createPeople(lazyClient);
       const results = await api.quickSearch(criteria);
       outputResult(results, program.opts());
     } catch (error) {
@@ -1004,7 +988,7 @@ peopleCmd
       if (merged.email) data.email = merged.email;
       if (merged.phone) data.phone = merged.phone;
 
-      const api = createPeople(await getClient());
+      const api = createPeople(lazyClient);
       const result = await api.findOrCreate(data);
       outputResult(result, globalOpts);
     } catch (error) {
@@ -1032,7 +1016,7 @@ peopleCmd
       if (merged.email) data.email = merged.email;
       if (merged.phone) data.phone = merged.phone;
 
-      const api = createPeople(await getClient());
+      const api = createPeople(lazyClient);
       const result = await api.create(data);
       outputResult(result, globalOpts);
     } catch (error) {
@@ -1074,7 +1058,7 @@ targetedEmailsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createTargetedEmails(await getClient());
+      const api = createTargetedEmails(lazyClient);
       outputResult(await api.list(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1087,7 +1071,7 @@ targetedEmailsCmd
   .action(async (foreignMessageId) => {
     try {
       validateNonemptyString(foreignMessageId, 'foreignMessageId');
-      const api = createTargetedEmails(await getClient());
+      const api = createTargetedEmails(lazyClient);
       outputResult(await api.get(foreignMessageId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1108,7 +1092,7 @@ activistCodesCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createActivistCodes(await getClient());
+      const api = createActivistCodes(lazyClient);
       const codes = await api.list(options);
       outputResult(codes, program.opts());
     } catch (error) {
@@ -1122,7 +1106,7 @@ activistCodesCmd
   .action(async (activistCodeId) => {
     try {
       validatePositiveInt(activistCodeId, 'activistCodeId');
-      const api = createActivistCodes(await getClient());
+      const api = createActivistCodes(lazyClient);
       const code = await api.get(activistCodeId);
       outputResult(code, program.opts());
     } catch (error) {
@@ -1163,7 +1147,7 @@ codesCmd
       if (options.orderby) listOptions.orderby = options.orderby;
       if (options.expand) listOptions.expand = options.expand;
 
-      const api = createCodes(await getClient());
+      const api = createCodes(lazyClient);
       outputResult(await api.list(listOptions), program.opts());
     } catch (error) {
       handleError(error);
@@ -1177,7 +1161,7 @@ codesCmd
   .action(async (codeId, options) => {
     try {
       validatePositiveInt(codeId, 'codeId');
-      const api = createCodes(await getClient());
+      const api = createCodes(lazyClient);
       outputResult(await api.get(codeId, options.expand ? { expand: options.expand } : {}), program.opts());
     } catch (error) {
       handleError(error);
@@ -1189,7 +1173,7 @@ codesCmd
   .description('List entity type names supported for codeType=Tag')
   .action(async () => {
     try {
-      const api = createCodes(await getClient());
+      const api = createCodes(lazyClient);
       outputResult(await api.supportedEntities(), program.opts());
     } catch (error) {
       handleError(error);
@@ -1203,7 +1187,7 @@ codesCmd
   .addOption(new Option('--codeType <type>', 'Code type to check against (default: SourceCode)').choices(['SourceCode', 'Tag']))
   .action(async (options) => {
     try {
-      const api = createCodes(await getClient());
+      const api = createCodes(lazyClient);
       outputResult(await api.isDuplicateName(options.name, options.codeType ? { codeType: options.codeType } : {}), program.opts());
     } catch (error) {
       handleError(error);
@@ -1243,7 +1227,7 @@ codesCmd
       if (merged.generalLedgerFundId !== undefined) data.generalLedgerFundId = merged.generalLedgerFundId;
       if (merged.costCenterId !== undefined) data.costCenterId = merged.costCenterId;
 
-      const api = createCodes(await getClient());
+      const api = createCodes(lazyClient);
       outputResult(await api.create(data), globalOpts);
     } catch (error) {
       handleError(error);
@@ -1265,7 +1249,7 @@ codesCmd
       if (merged.name !== undefined) data.name = merged.name;
       if (merged.parentCodeId !== undefined) data.parentCodeId = merged.parentCodeId;
 
-      const api = createCodes(await getClient());
+      const api = createCodes(lazyClient);
       outputResult(await api.update(codeId, data), globalOpts);
     } catch (error) {
       handleError(error);
@@ -1278,7 +1262,7 @@ codesCmd
   .action(async (codeId) => {
     try {
       validatePositiveInt(codeId, 'codeId');
-      const api = createCodes(await getClient());
+      const api = createCodes(lazyClient);
       const result = await api.delete(codeId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1319,7 +1303,7 @@ surveyQuestionsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createSurveyQuestions(await getClient());
+      const api = createSurveyQuestions(lazyClient);
       const questions = await api.list(options);
       outputResult(questions, program.opts());
     } catch (error) {
@@ -1333,7 +1317,7 @@ surveyQuestionsCmd
   .action(async (surveyQuestionId) => {
     try {
       validatePositiveInt(surveyQuestionId, 'surveyQuestionId');
-      const api = createSurveyQuestions(await getClient());
+      const api = createSurveyQuestions(lazyClient);
       const question = await api.get(surveyQuestionId);
       outputResult(question, program.opts());
     } catch (error) {
@@ -1365,7 +1349,7 @@ eventsCmd
       if (options.startDate) listOptions.startDate = validateDate(options.startDate, 'startDate');
       if (options.endDate) listOptions.endDate = validateDate(options.endDate, 'endDate');
 
-      const api = createEvents(await getClient());
+      const api = createEvents(lazyClient);
       const events = await api.list(listOptions);
       outputResult(events, program.opts());
     } catch (error) {
@@ -1380,7 +1364,7 @@ eventsCmd
   .action(async (eventId, options) => {
     try {
       validatePositiveInt(eventId, 'eventId');
-      const api = createEvents(await getClient());
+      const api = createEvents(lazyClient);
       const event = await api.get(eventId, options.expand ? { $expand: options.expand } : {});
       outputResult(event, program.opts());
     } catch (error) {
@@ -1415,7 +1399,7 @@ eventsCmd
         shiftEndTime: merged.shiftEndTime,
       };
       if (merged.shortName) data.shortName = merged.shortName;
-      const api = createEvents(await getClient());
+      const api = createEvents(lazyClient);
       const event = await api.create(data);
       outputResult(event, globalOpts);
     } catch (error) {
@@ -1450,7 +1434,7 @@ eventsCmd
       if (merged.roleId !== undefined) data.roleId = merged.roleId;
       if (merged.shiftStartTime !== undefined) data.shiftStartTime = merged.shiftStartTime;
       if (merged.shiftEndTime !== undefined) data.shiftEndTime = merged.shiftEndTime;
-      const api = createEvents(await getClient());
+      const api = createEvents(lazyClient);
       const result = await api.update(eventId, data);
       outputResult(result, globalOpts);
     } catch (error) {
@@ -1464,7 +1448,7 @@ eventsCmd
   .action(async (eventId) => {
     try {
       validatePositiveInt(eventId, 'eventId');
-      const api = createEvents(await getClient());
+      const api = createEvents(lazyClient);
       const result = await api.delete(eventId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1500,7 +1484,7 @@ eventsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (eventTypeId, options) => {
     try {
-      const api = createEvents(await getClient());
+      const api = createEvents(lazyClient);
       if (eventTypeId) {
         validatePositiveInt(eventTypeId, 'eventTypeId');
         outputResult(await api.getEventType(eventTypeId), program.opts());
@@ -1521,12 +1505,21 @@ const savedListsCmd = program
 
 savedListsCmd
   .command('list')
-  .description('List saved lists')
-  .option('--top <count>', 'Number of results (max 100)', val => parseInt(val, 10), 50)
-  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
+  .description('List saved lists (only lists in folders shared with the API key are returned)')
+  .option('--text <text>', 'Search by list name')
+  .option('--folderId <id>', 'Only lists in this folder (see: van folders list)')
+  .option('--maxDoorCount <count>', 'Only lists with at most this many doors')
+  .option('--maxPeopleCount <count>', 'Only lists with at most this many people')
+  .addOption(new Option('--isFollowed <bool>', 'Filter by whether the list is followed').choices(['true', 'false']))
+  .option('--top <count>', 'Number of results (1-100)', '50')
+  .option('--skip <count>', 'Number of results to skip', '0')
+  .addHelpText('after', `
+Examples:
+  $ van saved-lists list --text "Door knock" --top 100
+  $ van saved-lists list --folderId 12 --maxDoorCount 500 --isFollowed true`)
   .action(async (options) => {
     try {
-      const api = createSavedLists(await getClient());
+      const api = createSavedLists(lazyClient);
       const lists = await api.list(options);
       outputResult(lists, program.opts());
     } catch (error) {
@@ -1538,12 +1531,58 @@ savedListsCmd
   .command('get <savedListId>')
   .description('Get a saved list by ID')
   .option('-e, --expand <fields>', 'Expand related fields (comma-separated)')
+  .addHelpText('after', `
+Examples:
+  $ van saved-lists get 1234`)
   .action(async (savedListId, options) => {
     try {
       validatePositiveInt(savedListId, 'savedListId');
-      const api = createSavedLists(await getClient());
+      const api = createSavedLists(lazyClient);
       const list = await api.get(savedListId, options.expand ? { $expand: options.expand } : {});
       outputResult(list, program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// --- Folders ---
+
+const foldersCmd = program
+  .command('folders')
+  .description('Browse folders that saved lists are organized into');
+
+foldersCmd
+  .command('list')
+  .description('List folders')
+  .option('--text <text>', 'Search by folder name')
+  .option('--ids <ids>', 'Comma-separated folder IDs to return (e.g. 1,2,3)')
+  .option('--writableOnly', 'Only return shared folders others can save into (folders you own are always returned)')
+  .option('--top <count>', 'Number of results (>= 1)', '50')
+  .option('--skip <count>', 'Number of results to skip', '0')
+  .addHelpText('after', `
+Examples:
+  $ van folders list --text "Field"
+  $ van folders list --ids 1,2,3 --writableOnly`)
+  .action(async (options) => {
+    try {
+      const api = createFolders(lazyClient);
+      outputResult(await api.list(options), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+foldersCmd
+  .command('get <folderId>')
+  .description('Get a folder by ID')
+  .addHelpText('after', `
+Examples:
+  $ van folders get 12`)
+  .action(async (folderId) => {
+    try {
+      validatePositiveInt(folderId, 'folderId');
+      const api = createFolders(lazyClient);
+      outputResult(await api.get(folderId), program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -1556,23 +1595,60 @@ const exportJobsCmd = program
   .description('Manage export jobs');
 
 exportJobsCmd
+  .command('export-job-types')
+  .description('List the export job types allowed for your API key (use the exportJobTypeId as --type for export-jobs create)')
+  .addHelpText('after', `
+Examples:
+  $ van export-jobs export-job-types --pretty`)
+  .action(async () => {
+    try {
+      const api = createExportJobs(lazyClient);
+      outputResult(await api.listExportJobTypes(), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+exportJobsCmd
+  .command('get <exportJobId>')
+  .description('Get an export job by ID (there is no list endpoint; the ID comes from the export-jobs create response)')
+  .addHelpText('after', `
+Examples:
+  $ van export-jobs get 98765 --fields exportJobId,status,downloadUrl`)
+  .action(async (exportJobId) => {
+    try {
+      validatePositiveInt(exportJobId, 'exportJobId');
+      const api = createExportJobs(lazyClient);
+      outputResult(await api.get(exportJobId), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+exportJobsCmd
   .command('create')
-  .description('Create an export job for a saved list. Triggers an async export; the response includes a downloadUrl valid for ~7 hours.')
-  .requiredOption('-s, --savedListId <id>', 'Saved list ID to export', parseInt)
-  .requiredOption('-w, --webhookUrl <url>', 'Webhook URL for completion notification (must be a reachable public HTTPS URL)')
-  .option('--type <id>', 'Export job type ID (default: 4 = SavedListExport, the only standard type)', val => parseInt(val, 10), 4)
+  .description('Create an export job for a saved list. The export runs synchronously, so the response normally already has status "Completed" and a downloadUrl.')
+  .requiredOption('-s, --savedListId <id>', 'Saved list ID to export (must be in a folder shared with your API key)')
+  .option('--type <id>', 'Export job type ID allowed for your API key (default: 4 = SavedListExport; see: van export-jobs export-job-types)')
+  .requiredOption('-w, --webhookUrl <url>', 'Public HTTPS URL that VAN POSTs a completion message to')
+  .option('--surveyQuestionIds <ids>', 'Comma-separated survey question IDs to include (max 5)')
+  .option('--activistCodeIds <ids>', 'Comma-separated activist code IDs to include (max 5)')
+  .option('--customFieldIds <ids>', 'Comma-separated Contacts custom field IDs to include; must be enabled for merge (max 5)')
+  .option('--districtFieldIds <ids>', 'Comma-separated district field IDs to include; custom districts not allowed (max 5)')
+  .addHelpText('after', `
+At most 10 IDs in total across --surveyQuestionIds, --activistCodeIds, --customFieldIds and --districtFieldIds.
+Using any of those four options requires an extra permission on your API key; without it VAN returns
+"Extra permissions are required to request dynamic fields."
+
+Examples:
+  $ van export-jobs create --savedListId 1234 --webhookUrl https://example.com/van-hook
+  $ van export-jobs create --savedListId 1234 --webhookUrl https://example.com/van-hook --surveyQuestionIds 12,34,56`)
   .action(async (options) => {
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data: Record<string, unknown> = {
-        savedListId: merged.savedListId,
-        type: merged.type,
-        webhookUrl: validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl'),
-      };
-
-      const api = createExportJobs(await getClient());
-      const job = await api.create(data);
+      const api = createExportJobs(lazyClient);
+      const job = await api.create(merged);
       outputResult(job, globalOpts);
     } catch (error) {
       handleError(error);
@@ -1595,7 +1671,7 @@ canvassResponsesCmd
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const api = createCanvassResponses(await getClient());
+      const api = createCanvassResponses(lazyClient);
       const response = await api.create({
         vanId: merged.vanId,
         resultCodeId: merged.resultCodeId,
@@ -1616,7 +1692,7 @@ canvassResponsesCmd
   .action(async (options) => {
     try {
       validatePositiveInt(options.vanId, 'vanId');
-      const api = createCanvassResponses(await getClient());
+      const api = createCanvassResponses(lazyClient);
       const results = await api.list(options);
       outputResult(results, program.opts());
     } catch (error) {
@@ -1629,7 +1705,7 @@ canvassResponsesCmd
   .description('List valid canvass response input types')
   .action(async () => {
     try {
-      const api = createCanvassResponses(await getClient());
+      const api = createCanvassResponses(lazyClient);
       outputResult(await api.inputTypes(), program.opts());
     } catch (error) {
       handleError(error);
@@ -1641,7 +1717,7 @@ canvassResponsesCmd
   .description('List valid canvass response result codes')
   .action(async () => {
     try {
-      const api = createCanvassResponses(await getClient());
+      const api = createCanvassResponses(lazyClient);
       outputResult(await api.resultCodes(), program.opts());
     } catch (error) {
       handleError(error);
@@ -1653,7 +1729,7 @@ canvassResponsesCmd
   .description('List valid canvass response contact types')
   .action(async () => {
     try {
-      const api = createCanvassResponses(await getClient());
+      const api = createCanvassResponses(lazyClient);
       outputResult(await api.contactTypes(), program.opts());
     } catch (error) {
       handleError(error);
@@ -1675,7 +1751,7 @@ notesCmd
   .action(async (options) => {
     try {
       validatePositiveInt(options.vanId, 'vanId');
-      const api = createNotes(await getClient());
+      const api = createNotes(lazyClient);
       const notes = await api.list(options.vanId, options);
       outputResult(notes, program.opts());
     } catch (error) {
@@ -1691,7 +1767,7 @@ notesCmd
     try {
       validatePositiveInt(options.vanId, 'vanId');
       validatePositiveInt(noteId, 'noteId');
-      const api = createNotes(await getClient());
+      const api = createNotes(lazyClient);
       const note = await api.get(options.vanId, noteId);
       outputResult(note, program.opts());
     } catch (error) {
@@ -1710,7 +1786,7 @@ notesCmd
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
 
-      const api = createNotes(await getClient());
+      const api = createNotes(lazyClient);
       const note = await api.create(merged.vanId, {
         text: merged.text,
         noteCategoryId: merged.noteCategoryId
@@ -1731,7 +1807,7 @@ notesCmd
     try {
       validatePositiveInt(options.vanId, 'vanId');
       validatePositiveInt(noteId, 'noteId');
-      const api = createNotes(await getClient());
+      const api = createNotes(lazyClient);
       const result = await api.update(options.vanId, noteId, {
         text: options.text,
         noteCategoryId: options.noteCategoryId
@@ -1750,7 +1826,7 @@ notesCmd
     try {
       validatePositiveInt(options.vanId, 'vanId');
       validatePositiveInt(noteId, 'noteId');
-      const api = createNotes(await getClient());
+      const api = createNotes(lazyClient);
       const result = await api.delete(options.vanId, noteId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -1763,7 +1839,7 @@ notesCmd
   .description('List valid note categories')
   .action(async () => {
     try {
-      const api = createNotes(await getClient());
+      const api = createNotes(lazyClient);
       outputResult(await api.categories(), program.opts());
     } catch (error) {
       handleError(error);
@@ -1784,7 +1860,7 @@ contributionsCmd
   .action(async (vanId, options) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const api = createContributions(await getClient());
+      const api = createContributions(lazyClient);
       outputResult(await api.list(vanId, options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1797,7 +1873,7 @@ contributionsCmd
   .action(async (contributionId) => {
     try {
       validatePositiveInt(contributionId, 'contributionId');
-      const api = createContributions(await getClient());
+      const api = createContributions(lazyClient);
       outputResult(await api.get(contributionId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1818,7 +1894,7 @@ contributionsCmd
       validateDate(options.dateReceived, 'dateReceived');
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const api = createContributions(await getClient());
+      const api = createContributions(lazyClient);
       outputResult(await api.create(merged), globalOpts);
     } catch (error) {
       handleError(error);
@@ -1846,7 +1922,7 @@ contributionsCmd
       if (merged.designationId !== undefined) data.designationId = merged.designationId;
       if (merged.status !== undefined) data.status = merged.status;
       if (merged.paymentType !== undefined) data.paymentType = merged.paymentType;
-      const api = createContributions(await getClient());
+      const api = createContributions(lazyClient);
       outputResult(await api.update(contributionId, data), globalOpts);
     } catch (error) {
       handleError(error);
@@ -1866,7 +1942,7 @@ designationsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createDesignations(await getClient());
+      const api = createDesignations(lazyClient);
       outputResult(await api.list(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1880,7 +1956,7 @@ designationsCmd
   .action(async (designationId, options) => {
     try {
       validatePositiveInt(designationId, 'designationId');
-      const api = createDesignations(await getClient());
+      const api = createDesignations(lazyClient);
       outputResult(await api.get(designationId, options), program.opts());
     } catch (error) {
       handleError(error);
@@ -1924,7 +2000,7 @@ signupsCmd
       if (!options.eventId && !options.vanId) {
         emitError(EXIT_VALIDATION_ERROR, 'ValidationError', 'At least one of --eventId or --vanId is required.');
       }
-      const api = createSignups(await getClient());
+      const api = createSignups(lazyClient);
       const signups = await api.list(options);
       outputResult(signups, program.opts());
     } catch (error) {
@@ -1938,7 +2014,7 @@ signupsCmd
   .action(async (eventSignupId) => {
     try {
       validatePositiveInt(eventSignupId, 'eventSignupId');
-      const api = createSignups(await getClient());
+      const api = createSignups(lazyClient);
       outputResult(await api.get(eventSignupId), program.opts());
     } catch (error) {
       handleError(error);
@@ -1967,7 +2043,7 @@ signupsCmd
         locationId: merged.locationId,
       };
 
-      const api = createSignups(await getClient());
+      const api = createSignups(lazyClient);
       const signup = await api.create(data);
       outputResult(signup, globalOpts);
     } catch (error) {
@@ -1992,7 +2068,7 @@ signupsCmd
       if (merged.roleId !== undefined) data.roleId = merged.roleId;
       if (merged.statusId !== undefined) data.statusId = merged.statusId;
       if (merged.locationId !== undefined) data.locationId = merged.locationId;
-      const api = createSignups(await getClient());
+      const api = createSignups(lazyClient);
       outputResult(await api.update(signupId, data), globalOpts);
     } catch (error) {
       handleError(error);
@@ -2005,7 +2081,7 @@ signupsCmd
   .action(async (signupId) => {
     try {
       validatePositiveInt(signupId, 'signupId');
-      const api = createSignups(await getClient());
+      const api = createSignups(lazyClient);
       const result = await api.delete(signupId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -2026,7 +2102,7 @@ scoresCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createScores(await getClient());
+      const api = createScores(lazyClient);
       const scores = await api.list(options);
       outputResult(scores, program.opts());
     } catch (error) {
@@ -2040,7 +2116,7 @@ scoresCmd
   .action(async (scoreId) => {
     try {
       validatePositiveInt(scoreId, 'scoreId');
-      const api = createScores(await getClient());
+      const api = createScores(lazyClient);
       outputResult(await api.get(scoreId), program.opts());
     } catch (error) {
       handleError(error);
@@ -2053,7 +2129,7 @@ scoresCmd
   .action(async (vanId) => {
     try {
       validatePositiveInt(vanId, 'vanId');
-      const api = createScores(await getClient());
+      const api = createScores(lazyClient);
       outputResult(await api.getByPerson(vanId), program.opts());
     } catch (error) {
       handleError(error);
@@ -2072,7 +2148,7 @@ storiesCmd
   .action(async (storyId) => {
     try {
       const id = validatePositiveInt(storyId, 'storyId');
-      const api = createStories(await getClient());
+      const api = createStories(lazyClient);
       outputResult(await api.get(id), program.opts());
     } catch (error) {
       handleError(error);
@@ -2101,7 +2177,7 @@ storiesCmd
       if (merged.tags) data.tags = parseTagsOption(merged.tags);
       if (merged.campaignId !== undefined) data.campaignId = merged.campaignId;
 
-      const api = createStories(await getClient());
+      const api = createStories(lazyClient);
       const story = await api.create(data);
       outputResult(story, globalOpts);
     } catch (error) {
@@ -2123,7 +2199,7 @@ customFieldsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createCustomFields(await getClient());
+      const api = createCustomFields(lazyClient);
       const fields = await api.list(options);
       outputResult(fields, program.opts());
     } catch (error) {
@@ -2145,7 +2221,7 @@ locationsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createLocations(await getClient());
+      const api = createLocations(lazyClient);
       const locations = await api.list(options);
       outputResult(locations, program.opts());
     } catch (error) {
@@ -2159,7 +2235,7 @@ locationsCmd
   .action(async (locationId) => {
     try {
       validatePositiveInt(locationId, 'locationId');
-      const api = createLocations(await getClient());
+      const api = createLocations(lazyClient);
       outputResult(await api.get(locationId), program.opts());
     } catch (error) {
       handleError(error);
@@ -2179,7 +2255,7 @@ locationsCmd
   .option('--countryCode <country>', 'Country Code')
   .action(async (options) => {
     try {
-      const api = createLocations(await getClient());
+      const api = createLocations(lazyClient);
       outputResult(await api.create(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -2199,7 +2275,7 @@ locationsCmd
   .option('--countryCode <country>', 'Country Code')
   .action(async (options) => {
     try {
-      const api = createLocations(await getClient());
+      const api = createLocations(lazyClient);
       outputResult(await api.findOrCreate(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -2212,7 +2288,7 @@ locationsCmd
   .action(async (locationId) => {
     try {
       validatePositiveInt(locationId, 'locationId');
-      const api = createLocations(await getClient());
+      const api = createLocations(lazyClient);
       const result = await api.delete(locationId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -2234,7 +2310,7 @@ bulkImportCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createBulkImport(await getClient());
+      const api = createBulkImport(lazyClient);
       const jobs = await api.list(options);
       outputResult(jobs, program.opts());
     } catch (error) {
@@ -2256,7 +2332,7 @@ changedEntityExportCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createChangedEntityExportJobs(await getClient());
+      const api = createChangedEntityExportJobs(lazyClient);
       const jobs = await api.list(options);
       outputResult(jobs, program.opts());
     } catch (error) {
@@ -2281,7 +2357,7 @@ changedEntityExportCmd
       if (merged.dateChangedTo) data.dateChangedTo = validateDate(merged.dateChangedTo as string, 'dateChangedTo');
       if (merged.webhookUrl) data.webhookUrl = validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl');
 
-      const api = createChangedEntityExportJobs(await getClient());
+      const api = createChangedEntityExportJobs(lazyClient);
       const job = await api.create(data);
       outputResult(job, globalOpts);
     } catch (error) {
@@ -2302,7 +2378,7 @@ supporterGroupsCmd
   .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
   .action(async (options) => {
     try {
-      const api = createSupporterGroups(await getClient());
+      const api = createSupporterGroups(lazyClient);
       const groups = await api.list(options);
       outputResult(groups, program.opts());
     } catch (error) {
@@ -2316,7 +2392,7 @@ supporterGroupsCmd
   .action(async (supporterGroupId) => {
     try {
       validatePositiveInt(supporterGroupId, 'supporterGroupId');
-      const api = createSupporterGroups(await getClient());
+      const api = createSupporterGroups(lazyClient);
       outputResult(await api.get(supporterGroupId), program.opts());
     } catch (error) {
       handleError(error);
@@ -2338,7 +2414,7 @@ supporterGroupsCmd
 
       if (merged.description) data.description = merged.description;
 
-      const api = createSupporterGroups(await getClient());
+      const api = createSupporterGroups(lazyClient);
       const group = await api.create(data);
       outputResult(group, globalOpts);
     } catch (error) {
@@ -2352,7 +2428,7 @@ supporterGroupsCmd
   .action(async (supporterGroupId) => {
     try {
       validatePositiveInt(supporterGroupId, 'supporterGroupId');
-      const api = createSupporterGroups(await getClient());
+      const api = createSupporterGroups(lazyClient);
       const result = await api.delete(supporterGroupId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -2367,7 +2443,7 @@ supporterGroupsCmd
     try {
       validatePositiveInt(supporterGroupId, 'supporterGroupId');
       validatePositiveInt(vanId, 'vanId');
-      const api = createSupporterGroups(await getClient());
+      const api = createSupporterGroups(lazyClient);
       const result = await api.addPerson(supporterGroupId, vanId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -2383,7 +2459,7 @@ supporterGroupsCmd
     try {
       validatePositiveInt(supporterGroupId, 'supporterGroupId');
       validatePositiveInt(vanId, 'vanId');
-      const api = createSupporterGroups(await getClient());
+      const api = createSupporterGroups(lazyClient);
       const result = await api.removePerson(supporterGroupId, vanId);
       outputResult(result, program.opts());
     } catch (error) {
@@ -2415,7 +2491,7 @@ targetsCmd
   .option('--with-subgroups', 'Include expanded subgroups view')
   .action(async (options) => {
     try {
-      const api = createTargets(await getClient());
+      const api = createTargets(lazyClient);
       outputResult(await api.list(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -2428,7 +2504,7 @@ targetsCmd
   .action(async (targetId, options) => {
     try {
       validatePositiveInt(targetId, 'targetId');
-      const api = createTargets(await getClient());
+      const api = createTargets(lazyClient);
       outputResult(await api.get(targetId), program.opts());
     } catch (error) {
       handleError(error);
@@ -2447,7 +2523,7 @@ targetsCmd
       } else if (options.minivanFormats) {
         emitError(EXIT_VALIDATION_ERROR, 'ValidationError', '--minivan-formats requires --target-id to be specified.');
       }
-      const api = createTargets(await getClient());
+      const api = createTargets(lazyClient);
       outputResult(await api.subgroups(options), program.opts());
     } catch (error) {
       handleError(error);
@@ -2465,7 +2541,7 @@ apiKeyProfilesCmd
   .description('Get API key profile details for the current API key')
   .action(async () => {
     try {
-      const api = createApiKeyProfiles(await getClient());
+      const api = createApiKeyProfiles(lazyClient);
       const profileDetails = await api.get();
       outputResult(profileDetails, program.opts());
     } catch (error) {
@@ -2571,7 +2647,7 @@ apiCmd
   .action(async (endpoint) => {
     try {
       const { path, params } = parseEndpoint(endpoint);
-      const result = await (await getClient()).get(path, params);
+      const result = await lazyClient.get(path, params);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -2586,7 +2662,7 @@ apiCmd
     try {
       const globalOpts = program.opts();
       const body = mergeJsonOption(options, globalOpts);
-      const result = await (await getClient()).post(normalizeEndpoint(endpoint), body);
+      const result = await lazyClient.post(normalizeEndpoint(endpoint), body);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -2601,7 +2677,7 @@ apiCmd
     try {
       const globalOpts = program.opts();
       const body = mergeJsonOption(options, globalOpts);
-      const result = await (await getClient()).put(normalizeEndpoint(endpoint), body);
+      const result = await lazyClient.put(normalizeEndpoint(endpoint), body);
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
@@ -2613,7 +2689,7 @@ apiCmd
   .description('DELETE any VAN API endpoint')
   .action(async (endpoint) => {
     try {
-      const result = await (await getClient()).delete(normalizeEndpoint(endpoint));
+      const result = await lazyClient.delete(normalizeEndpoint(endpoint));
       outputResult(result, program.opts());
     } catch (error) {
       handleError(error);
