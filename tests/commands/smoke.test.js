@@ -2,6 +2,7 @@ const createPeople = require('../../dist/commands/people').default;
 const createEvents = require('../../dist/commands/events').default;
 const createSavedLists = require('../../dist/commands/savedLists').default;
 const createExportJobs = require('../../dist/commands/exportJobs').default;
+const createFolders = require('../../dist/commands/folders').default;
 const createContributions = require('../../dist/commands/contributions').default;
 const createSignups = require('../../dist/commands/signups').default;
 const createNotes = require('../../dist/commands/notes').default;
@@ -64,6 +65,74 @@ describe('command module wiring tests', () => {
     await createExportJobs(client).create({ savedListId: 42, type: 7, webhookUrl: 'https://hooks.example.com/van' });
 
     expect(client.post).toHaveBeenCalledWith('/exportJobs', expect.objectContaining({ type: 7 }));
+  });
+
+  it('export-jobs create wraps ids in objects and sends only known input properties', async () => {
+    await createExportJobs(client).create({
+      savedListId: '42', webhookUrl: 'https://hooks.example.com/van',
+      surveyQuestionIds: ' 12, 34 ,56', activistCodeIds: '7', customFieldIds: [8], districtFieldIds: '9',
+      exportJobId: 1, status: 'Completed', downloadUrl: 'x', canvassFileRequestId: 1, surveyQuestions: [{ surveyQuestionId: 99 }],
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/exportJobs', {
+      savedListId: 42,
+      type: 4,
+      webhookUrl: 'https://hooks.example.com/van',
+      surveyQuestions: [{ surveyQuestionId: 12 }, { surveyQuestionId: 34 }, { surveyQuestionId: 56 }],
+      activistCodes: [{ activistCodeId: 7 }],
+      customFields: [{ customFieldId: 8 }],
+      districtFields: [{ districtFieldId: 9 }],
+    });
+  });
+
+  it('export-jobs create leaves out id lists that are not given', async () => {
+    await createExportJobs(client).create({ savedListId: 42, webhookUrl: 'https://hooks.example.com/van', districtFieldIds: '9' });
+
+    expect(client.post).toHaveBeenCalledWith('/exportJobs', {
+      savedListId: 42, type: 4, webhookUrl: 'https://hooks.example.com/van', districtFields: [{ districtFieldId: 9 }],
+    });
+  });
+
+  it('export-jobs create allows at most 10 ids across all lists', async () => {
+    const base = { savedListId: 42, webhookUrl: 'https://hooks.example.com/van', surveyQuestionIds: '1,2,3,4,5', activistCodeIds: '1,2,3,4,5' };
+    await createExportJobs(client).create(base);
+    await expect(createExportJobs(client).create({ ...base, districtFieldIds: '1' })).rejects.toThrow(/At most 10 ids .* got 11/);
+    expect(client.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('export-jobs responses drop canvassFileRequest* aliases and lead with exportJobId/status', async () => {
+    client.get.mockResolvedValueOnce({ canvassFileRequestId: 5, canvassFileRequestGuid: 'g', exportJobGuid: 'g', downloadUrl: null, status: 'Error', errorCode: 'NoRecords', exportJobId: 5 });
+
+    const job = await createExportJobs(client).get(5);
+
+    expect(client.get).toHaveBeenCalledWith('/exportJobs/5');
+    expect(Object.keys(job)).toEqual(['exportJobId', 'status', 'errorCode', 'downloadUrl', 'exportJobGuid']);
+  });
+
+  it('export-jobs responses omit errorCode unless status is Error', async () => {
+    client.get.mockResolvedValueOnce({ exportJobId: 6, status: 'Completed', errorCode: null, downloadUrl: 'https://dl', exportJobGuid: 'g' });
+
+    const job = await createExportJobs(client).get(6);
+
+    expect(job).toEqual({ exportJobId: 6, status: 'Completed', downloadUrl: 'https://dl', exportJobGuid: 'g' });
+    expect(Object.keys(job)).toEqual(['exportJobId', 'status', 'downloadUrl', 'exportJobGuid']);
+  });
+
+  it('maps saved-lists list filters to /savedLists query params', async () => {
+    await createSavedLists(client).list({ text: 'Door', folderId: '12', maxDoorCount: '0', maxPeopleCount: '250', isFollowed: 'false', top: '100', skip: '20' });
+
+    expect(client.get).toHaveBeenCalledWith('/savedLists', {
+      $top: 100, $skip: 20, text: 'Door', folderId: 12, maxDoorCount: 0, maxPeopleCount: 250, isFollowed: false,
+    });
+    await expect(createSavedLists(client).list({ top: '101' })).rejects.toThrow(/top must be an integer between 1 and 100/);
+  });
+
+  it('maps folders list ids to a single comma-delimited query value', async () => {
+    await createFolders(client).list({ ids: '1, 2,3', writableOnly: true });
+    await createFolders(client).list({ writableOnly: false });
+
+    expect(client.get).toHaveBeenNthCalledWith(1, '/folders', { $top: 50, $skip: 0, ids: '1,2,3', writableOnly: true });
+    expect(client.get).toHaveBeenNthCalledWith(2, '/folders', { $top: 50, $skip: 0 });
   });
 
   it('maps people quickSearch params to /people/quickSearch', async () => {

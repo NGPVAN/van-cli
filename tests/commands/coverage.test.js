@@ -10,6 +10,7 @@ const createDesignations = require('../../dist/commands/designations').default;
 const createTargetedEmails = require('../../dist/commands/targetedEmails').default;
 const createEvents = require('../../dist/commands/events').default;
 const createExportJobs = require('../../dist/commands/exportJobs').default;
+const createFolders = require('../../dist/commands/folders').default;
 const createLocations = require('../../dist/commands/locations').default;
 const createNotes = require('../../dist/commands/notes').default;
 const createPeople = require('../../dist/commands/people').default;
@@ -109,10 +110,14 @@ describe('command modules broad coverage', () => {
     });
   });
 
-  test('saved lists / targets / supporter groups', async () => {
+  test('saved lists / folders / targets / supporter groups', async () => {
     const lists = createSavedLists(client);
     await lists.list({ top: 100, skip: 1 });
     await lists.get(1, { $expand: 'people' });
+
+    const folders = createFolders(client);
+    await folders.list({ text: 'Field', ids: '1,2', writableOnly: true, top: 10, skip: 1 });
+    await folders.get(2);
 
     const targets = createTargets(client);
     await targets.list({ top: 50, skip: 2, status: 'Ready', type: 'Static' });
@@ -150,11 +155,9 @@ describe('command modules broad coverage', () => {
     await email.get('msg-foreign-id-123');
 
     const exportJobs = createExportJobs(client);
-    await exportJobs.list({ top: 10, skip: 1, status: 'Completed' });
+    await exportJobs.listExportJobTypes();
     await exportJobs.get(3);
     await exportJobs.create({ savedListId: 1, webhookUrl: 'https://example.com/hook' });
-    await exportJobs.getDownloadUrl(3);
-    await exportJobs.getAll(500);
 
     const changed = createChangedEntityExportJobs(client);
     await changed.list({ top: 10, skip: 1, status: 'Completed' });

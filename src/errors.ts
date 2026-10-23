@@ -13,3 +13,11 @@ export class VanApiError extends Error {
     this.details = (data as { errors?: VanApiErrorDetails })?.errors ?? data;
   }
 }
+
+// Thrown by SDK methods when caller input fails client-side validation, before any request is sent.
+export class VanValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
