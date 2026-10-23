@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import type { VanApiClientLike } from '../types';
-import { validateBoolean, validateIdList, validateIntRange, validateNonNegativeInt, validatePositiveInt } from '../validation';
+import { validateBoolean, validateIdList, validatePaging, validatePositiveInt } from '../validation';
 
 /**
  * Folders API endpoints
@@ -19,10 +19,7 @@ import { validateBoolean, validateIdList, validateIntRange, validateNonNegativeI
  * @returns {Object} Query params
  */
 function buildListParams(options = {}) {
-  const params = {
-    $top: options.top === undefined ? 50 : validateIntRange(options.top, 'top', 1),
-    $skip: options.skip === undefined ? 0 : validateNonNegativeInt(options.skip, 'skip')
-  };
+  const params = validatePaging(options);
 
   if (options.text !== undefined) params.text = options.text;
   if (options.ids !== undefined) params.ids = validateIdList(options.ids, 'ids', { allowDuplicates: true }).join(',');

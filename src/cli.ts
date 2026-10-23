@@ -389,11 +389,16 @@ function outputResult(data: unknown, options: Record<string, unknown> = {}) {
 
 // Error handler
 
+// How far handleError follows an error's cause chain looking for a CliExit. SDK wrappers add
+// one level, so this is generous; it only exists to stop a cyclic chain from looping forever.
+const MAX_CAUSE_DEPTH = 10;
+
 function handleError(error: unknown): never {
   // Already printed by emitError — pass it through unchanged rather than re-wrapping it. SDK methods
   // that wrap failures (e.g. people.delete) can carry it as a cause, since lazyClient resolves
   // credentials (and may emit AuthRequired) inside the SDK call.
-  for (let e: unknown = error; e instanceof Error; e = e.cause) {
+  let e: unknown = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && e instanceof Error; depth++, e = e.cause) {
     if (e instanceof CliExit) throw e;
   }
   if (error instanceof VanValidationError) {

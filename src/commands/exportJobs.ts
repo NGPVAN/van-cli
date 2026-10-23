@@ -38,11 +38,13 @@ function formatExportJob(job) {
   const { exportJobId, status, downloadUrl, errorCode, ...rest } = job;
   for (const alias of LEGACY_ALIASES) delete rest[alias];
 
-  const result = { exportJobId, status };
-  if (status === 'Error') result.errorCode = errorCode;
-  result.downloadUrl = downloadUrl;
-  if (status !== 'Error') result.errorCode = errorCode;
-  return { ...result, ...rest };
+  return {
+    exportJobId,
+    status,
+    ...(status === 'Error' ? { errorCode } : {}),
+    downloadUrl,
+    ...rest,
+  };
 }
 
 /**

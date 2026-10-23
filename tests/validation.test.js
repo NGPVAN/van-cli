@@ -5,6 +5,7 @@ const {
   validateBoolean,
   validateIdList,
   validateWebhookUrl,
+  validatePaging,
 } = require('../dist/validation');
 const { VanValidationError } = require('../dist/errors');
 
@@ -106,13 +107,52 @@ describe('shared validators', () => {
       'https://[::ffff:127.0.0.1]/hook', 'https://[::ffff:10.1.2.3]/hook', 'https://[::ffff:192.168.0.1]/hook',
       'https://[fd00::1]/hook', 'https://[fe80::1]/hook',
       'https://localhost./hook', 'https://api.localhost./hook', 'https://127.0.0.1./hook',
+      // IPv4: CGNAT, IETF protocol assignments, TEST-NETs, benchmarking, multicast/reserved
+      'https://100.64.0.1/hook', 'https://100.127.255.254/hook', 'https://192.0.0.8/hook', 'https://192.0.2.1/hook',
+      'https://198.18.0.1/hook', 'https://198.19.255.1/hook', 'https://198.51.100.1/hook', 'https://203.0.113.1/hook',
+      'https://224.0.0.1/hook', 'https://239.255.255.250/hook', 'https://240.0.0.1/hook', 'https://255.255.255.255/hook',
+      // IPv6: IPv4-compatible, NAT64 (well-known + local-use), 6to4, site-local, multicast, unspecified
+      'https://[::127.0.0.1]/hook', 'https://[::a00:1]/hook', 'https://[64:ff9b::127.0.0.1]/hook',
+      'https://[64:ff9b::a9fe:a9fe]/hook', 'https://[64:ff9b:1::1]/hook', 'https://[2002:7f00:1::1]/hook',
+      'https://[fec0::1]/hook', 'https://[ff02::1]/hook', 'https://[::]/hook',
     ])('rejects private/internal address %p', (value) => {
       expect(() => validateWebhookUrl(value, 'webhookUrl')).toThrow(/private\/internal address/);
     });
 
-    test.each(['https://10.example.com/hook', 'https://172.16.example.com/hook', 'https://[2001:db8::1]/hook', 'https://[::ffff:8.8.8.8]/hook', 'https://example.com./hook'])(
-      'accepts public hostname %p', (value) => {
-        expect(validateWebhookUrl(value, 'webhookUrl')).toBe(value);
+    test.each([
+      'https://10.example.com/hook', 'https://172.16.example.com/hook', 'https://[2001:db8::1]/hook', 'https://[::ffff:8.8.8.8]/hook',
+      'https://example.com./hook', 'https://100.63.255.255/hook', 'https://100.128.0.1/hook', 'https://198.20.0.1/hook',
+      'https://223.255.255.255/hook', 'https://[64:ff9b::8.8.8.8]/hook', 'https://[2002:808:808::1]/hook', 'https://[2606:4700::1111]/hook',
+    ])('accepts public address %p', (value) => {
+      expect(validateWebhookUrl(value, 'webhookUrl')).toBe(value);
+    });
+
+    test('trims surrounding whitespace from the returned URL', () => {
+      expect(validateWebhookUrl('  https://hooks.example.com/van \n', 'webhookUrl')).toBe('https://hooks.example.com/van');
+    });
+
+    test.each(['https://user:pw@hooks.example.com/van', 'https://user@hooks.example.com/van', 'https://:pw@hooks.example.com/van'])(
+      'rejects userinfo %p without echoing it', (value) => {
+        expect(() => validateWebhookUrl(value, 'webhookUrl')).toThrow(/must not include a username or password/);
+        expect(() => validateWebhookUrl(value, 'webhookUrl')).not.toThrow(/pw|user@/);
       });
+
+    test('does not echo the value when the URL is invalid', () => {
+      expect(() => validateWebhookUrl('secret-token not a url', 'webhookUrl')).not.toThrow(/secret-token/);
+    });
+  });
+
+  describe('validatePaging', () => {
+    test('defaults to $top 50 / $skip 0 and coerces strings', () => {
+      expect(validatePaging({})).toEqual({ $top: 50, $skip: 0 });
+      expect(validatePaging({ top: '100', skip: '20' }, 100)).toEqual({ $top: 100, $skip: 20 });
+    });
+
+    test('enforces bounds', () => {
+      expect(() => validatePaging({ top: '101' }, 100)).toThrow(/top must be an integer between 1 and 100/);
+      expect(() => validatePaging({ top: 0 })).toThrow(/top must be an integer >= 1/);
+      expect(() => validatePaging({ skip: -1 })).toThrow(/skip must be a non-negative integer/);
+      expect(validatePaging({ top: 5000 })).toEqual({ $top: 5000, $skip: 0 });
+    });
   });
 });

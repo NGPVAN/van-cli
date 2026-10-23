@@ -109,6 +109,15 @@ describe('command module wiring tests', () => {
     expect(Object.keys(job)).toEqual(['exportJobId', 'status', 'errorCode', 'downloadUrl', 'exportJobGuid']);
   });
 
+  it('export-jobs responses omit errorCode unless status is Error', async () => {
+    client.get.mockResolvedValueOnce({ exportJobId: 6, status: 'Completed', errorCode: null, downloadUrl: 'https://dl', exportJobGuid: 'g' });
+
+    const job = await createExportJobs(client).get(6);
+
+    expect(job).toEqual({ exportJobId: 6, status: 'Completed', downloadUrl: 'https://dl', exportJobGuid: 'g' });
+    expect(Object.keys(job)).toEqual(['exportJobId', 'status', 'downloadUrl', 'exportJobGuid']);
+  });
+
   it('maps saved-lists list filters to /savedLists query params', async () => {
     await createSavedLists(client).list({ text: 'Door', folderId: '12', maxDoorCount: '0', maxPeopleCount: '250', isFollowed: 'false', top: '100', skip: '20' });
 
