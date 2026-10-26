@@ -11,6 +11,7 @@ import createDesignations from './commands/designations';
 import createTargetedEmails from './commands/targetedEmails';
 import createEvents from './commands/events';
 import createExportJobs from './commands/exportJobs';
+import createFolders from './commands/folders';
 import createLocations from './commands/locations';
 import createNotes from './commands/notes';
 import createPeople from './commands/people';
@@ -37,6 +38,7 @@ export class VanApi {
   targetedEmails: ReturnType<typeof createTargetedEmails>;
   events: ReturnType<typeof createEvents>;
   exportJobs: ReturnType<typeof createExportJobs>;
+  folders: ReturnType<typeof createFolders>;
   locations: ReturnType<typeof createLocations>;
   notes: ReturnType<typeof createNotes>;
   people: ReturnType<typeof createPeople>;
@@ -62,6 +64,7 @@ export class VanApi {
     this.targetedEmails = createTargetedEmails(this.client);
     this.events = createEvents(this.client);
     this.exportJobs = createExportJobs(this.client);
+    this.folders = createFolders(this.client);
     this.locations = createLocations(this.client);
     this.notes = createNotes(this.client);
     this.people = createPeople(this.client);

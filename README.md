@@ -130,7 +130,11 @@ van people find --city "Falls Church" --stateOrProvince VA --lastName Smith --to
 van people quick-search --name "John Smith" --top 10 --pretty
 van api-key-profiles --pretty
 van saved-lists list --top 100
-van export-jobs create --savedListId 12345
+van saved-lists list --folderId 12 --text "Door knock"
+van folders list --writableOnly
+van export-jobs export-job-types --pretty
+van export-jobs create --savedListId 12345 --webhookUrl https://example.com/van-hook --surveyQuestionIds 12,34
+van export-jobs get 98765
 ```
 
 ## Resource support
@@ -150,7 +154,8 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 - `surveyQuestions`: `list`, `get`
 - `events`: `list`, `get`, `create`, `update`, `delete`
 - `savedLists`: `list`, `get`
-- `exportJobs`: `list`, `get`, `create`, `getDownloadUrl`, `getAll`
+- `exportJobs`: `listExportJobTypes`, `get`, `create`
+- `folders`: `list`, `get`
 - `canvassResponses`: `create`, `list`, `inputTypes`, `resultCodes`, `contactTypes`
 - `contributions`: `list`, `get`, `create`, `update`
 - `designations`: `list`, `get`
@@ -178,7 +183,8 @@ The CLI currently implements a subset of SDK methods:
 - `survey-questions`: `list`, `get`
 - `events`: `list`, `expand-fields`, `get`, `create`, `update`, `delete`, `event-types`
 - `saved-lists`: `list`, `get`
-- `export-jobs`: `create`
+- `export-jobs`: `export-job-types`, `get`, `create`
+- `folders`: `list`, `get`
 - `canvass-responses`: `create`, `list`, `input-types`, `result-codes`, `contact-types`
 - `notes`: `list`, `get`, `create`, `update`, `delete`, `categories`
 - `codes`: `list`, `get`, `supported-entities`, `is-duplicate-name`, `create`, `update`, `delete`, `expand-fields`
