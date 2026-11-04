@@ -1,6 +1,6 @@
 ---
 name: add-van-entity
-description: Audit and implement van-cli support for one NGP VAN API entity (e.g. changedEntityExportJobs, bulkImport, customFields). Phase 1 compares the real VAN endpoints against the existing SDK module, CLI commands, tests and README and reports gaps for developer review; Phase 2 implements the agreed scope. Use when asked to add, update, audit or finish CLI support for a VAN entity.
+description: Audit and implement van-cli support for one NGP VAN API entity (e.g. bulkImport, customFields, stories). Phase 1 compares the real VAN endpoints against the existing SDK module, CLI commands, tests and README and reports gaps for developer review; Phase 2 implements the agreed scope. Use when asked to add, update, audit or finish CLI support for a VAN entity.
 argument-hint: <entity name, any casing> [special instructions]
 ---
 
@@ -17,11 +17,12 @@ The skill runs in two phases with a hard stop between them. **Do not edit any fi
 The developer may give the name in any form, and it may not match exactly: `bulkImport`, `bulk-import`, `bulk_import`, `BulkImportJobs`, `bulk import`. Split it into words and build these variants:
 
 - camelCase (`bulkImport`): the `src/commands/<entity>.ts` module, the `VanApi` property and the README lines
-- kebab-case (`bulk-import`): the CLI command group and the docs page names
+- kebab-case (`bulk-import`): the CLI command group
+- lowercase with no separators (`bulkimportjobs`): the docs reference page names
 - snake_case (`bulk_import`): the `van` MCP tool names
 - Title Case (`Bulk Import`): the `// --- <Entity> ---` section in `cli.ts` and the docs headings
 
-Search each source with the variant that fits it, and also try singular and plural forms and nearby names (`bulkImport` and `bulkImportJobs`, `exportJobs` and `changedEntityExportJobs`). If the matches point to more than one entity, or to none, list the candidates and ask the developer before going on. Use the resolved forms everywhere below.
+Search each source with the variant that fits it, and also try singular and plural forms and nearby names (`bulkImport` and `bulkImportJobs`, `events` and `eventTypes`). If the matches point to more than one entity, or to none, list the candidates and ask the developer before going on. Use the resolved forms everywhere below.
 
 ---
 
@@ -31,7 +32,11 @@ Search each source with the variant that fits it, and also try singular and plur
 
 Use each source and record which ones confirm each endpoint:
 
-- **VAN docs.** Start at `https://docs.ngpvan.com/reference/overview.md`. Adding `.md` to a docs URL gives a version agents can read; use it on every page you fetch. Find the entity's pages from the overview's list of pages instead of guessing a URL, and match loosely, because the names in the docs often differ from van-cli's. Follow the linked sub-resource pages too (resources, mapping types, status, and so on). Capture the method, path, path and query params, required and optional body fields, and the response shape. The docs are often incomplete: a page may document only the POST, or only the GET.
+- **VAN docs.** Adding `.md` to a docs URL gives a version agents can read; use it on every page you fetch. Look for the entity's pages in two places, because the index leaves out some pages that exist:
+  - The index at `https://docs.ngpvan.com/llms.txt`. Match loosely, because the names in the docs often differ from van-cli's.
+  - The reference page `https://docs.ngpvan.com/reference/<lowercase-no-separators>.md`, plus its singular and plural forms and nearby names (`bulkimport`, `bulkimportjobs`). Check every one of these, even when the index has a match.
+
+  Follow the linked sub-resource pages too (resources, mapping types, status, and so on). Capture the method, path, path and query params, required and optional body fields, and the response shape. The docs are often incomplete: a page may document only the POST, or only the GET.
 - **`van` MCP server tools.** The tools are named `mcp__van__van_<snake_case>_<action>`, for example `mcp__van__van_bulk_import_job_create`. They are usually deferred: only their names are listed, and their parameters can't be read until they're loaded. Search with ToolSearch (for example `+van bulk import`), then load the matches with `select:<name>,<name>` and read their schemas. A deferred tool's name being listed counts as "the tool exists". Don't decide the MCP source is missing until you've searched. These tools come from a separate, working implementation, so they're a second source for which endpoints exist and what their bodies look like. Don't call write tools.
 - **Developer input.** Use any request bodies, sample responses or quirks given in the special instructions.
 
@@ -72,7 +77,7 @@ Then stop and ask the developer to confirm or adjust the scope. Don't start Phas
 
 ## Phase 2: Implement the agreed scope
 
-Implement only what was agreed. Follow the newest modules as the reference style: `src/commands/changedEntityExportJobs.ts`, `exportJobs.ts`, `folders.ts`, `savedLists.ts`, `stories.ts`, and their `cli.ts` sections.
+Implement only what was agreed. Follow the newest modules as the reference style: `src/commands/exportJobs.ts`, `folders.ts`, `savedLists.ts`, `stories.ts`, and their `cli.ts` sections.
 
 ### SDK module (`src/commands/<entity>.ts`)
 
