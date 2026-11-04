@@ -16,7 +16,7 @@ describe('VanApiClient', () => {
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
-    mockFetch = jest.fn();
+    mockFetch = vi.fn();
     globalThis.fetch = mockFetch;
   });
 

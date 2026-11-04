@@ -7,7 +7,7 @@ describe('SDK exports', () => {
   afterEach(() => {
     process.env.VAN_API_KEY = originalKey;
     process.env.VAN_APP_NAME = originalApp;
-    jest.resetModules();
+    vi.resetModules();
   });
 
   it('configure returns a usable instance', () => {
@@ -29,7 +29,11 @@ describe('SDK exports', () => {
     process.env.VAN_API_KEY = '';
     process.env.VAN_APP_NAME = '';
 
+    const resolved = require.resolve('../dist/index');
+    delete require.cache[resolved];
     const { getDefaultInstance: freshGetDefault } = require('../dist/index');
+    delete require.cache[resolved];
+
     expect(() => freshGetDefault()).toThrow(/VAN_API_KEY/);
   });
 });
