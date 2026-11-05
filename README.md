@@ -135,6 +135,9 @@ van folders list --writableOnly
 van export-jobs export-job-types --pretty
 van export-jobs create --savedListId 12345 --webhookUrl https://example.com/van-hook --surveyQuestionIds 12,34
 van export-jobs get 98765
+van changed-entity-exports resources --pretty
+van changed-entity-exports create --resourceType Contacts --dateChangedFrom 2026-10-01 --requestedFields Prefix,DateCreated
+van changed-entity-exports get 98765 --fields exportJobId,jobStatus,files
 ```
 
 ## Resource support
@@ -168,7 +171,7 @@ const van = new VanApi({ apiKey: process.env.VAN_API_KEY! });
 - `stories`: `get`, `create`
 - `targetedEmails`: `list`, `get`
 - `bulkImport`: `list`, `listJobs`, `getJob`, `createJob`, `uploadData`, `startJob`, `cancelJob`, `getJobResults`, `getJobErrors`, `getAllJobs`
-- `changedEntityExportJobs`: `list`, `get`, `create`, `getDownloadUrl`, `cancel`, `getStatus`, `getAll`
+- `changedEntityExportJobs`: `listResources`, `listFields`, `listChangeTypes`, `get`, `create`
 - `locations`: `list`, `get`, `create`, `findOrCreate`, `delete`
 - `eventTypes`: `list`, `get`
 - `supporterGroups`: `list`, `get`, `create`, `addPerson`, `removePerson`, `delete`
@@ -197,7 +200,7 @@ The CLI currently implements a subset of SDK methods:
 - `locations`: `list`, `get`, `create`, `find-or-create`, `delete`
 - `targeted-emails`: `list`, `get`
 - `bulk-import`: `list`
-- `changed-entity-exports`: `list`, `create`
+- `changed-entity-exports`: `resources`, `fields`, `change-types`, `get`, `create`
 - `supporter-groups`: `list`, `get`, `create`, `add-person`, `remove-person`, `delete`
 - `targets`: `list`, `get`, `subgroup`
 - `api-key-profiles`

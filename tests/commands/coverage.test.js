@@ -160,13 +160,11 @@ describe('command modules broad coverage', () => {
     await exportJobs.create({ savedListId: 1, webhookUrl: 'https://example.com/hook' });
 
     const changed = createChangedEntityExportJobs(client);
-    await changed.list({ top: 10, skip: 1, status: 'Completed' });
+    await changed.listResources();
+    await changed.listFields("Contacts");
+    await changed.listChangeTypes("Contacts");
     await changed.get(9);
-    await changed.create({ dateChangedFrom: '2026-01-01', dateChangedTo: '2026-02-01', webhookUrl: 'https://example.com/hook' });
-    await changed.getDownloadUrl(9);
-    await changed.cancel(9);
-    await changed.getStatus(9);
-    await changed.getAll({ status: 'Completed' }, 500);
+    await changed.create({ resourceType: "Contacts", dateChangedFrom: "2026-01-01" });
 
     const bulk = createBulkImport(client);
     await bulk.list({ top: 10, skip: 1, status: 'Completed' });
@@ -223,6 +221,11 @@ describe('command modules broad coverage', () => {
     await expect(createLocations(client).findOrCreate({})).rejects.toThrow(/name/);
     await expect(createSupporterGroups(client).create({})).rejects.toThrow(/name/);
     await expect(createCodes(client).create({})).rejects.toThrow(/name/);
+    await expect(createChangedEntityExportJobs(client).create({ dateChangedFrom: "2026-01-01" })).rejects.toThrow(/resourceType/);
+    await expect(createChangedEntityExportJobs(client).create({ resourceType: "Contacts" })).rejects.toThrow(/dateChangedFrom/);
+    await expect(createChangedEntityExportJobs(client).listFields("")).rejects.toThrow(/resourceType/);
+    await expect(createChangedEntityExportJobs(client).listChangeTypes()).rejects.toThrow(/resourceType/);
+    await expect(createChangedEntityExportJobs(client).get("abc")).rejects.toThrow(/exportJobId/);
   });
 
   test('stories create fetches the created story instead of trusting the POST echo', async () => {
