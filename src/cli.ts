@@ -2,7 +2,7 @@ import { Command, program, Option } from 'commander';
 import chalk from 'chalk';
 import { version } from '../package.json';
 import { VanApiError, VanValidationError } from './errors';
-import { validatePositiveInt, validateWebhookUrl } from './validation';
+import { validatePositiveInt } from './validation';
 import type { VanApiClientLike } from './types';
 import { getProfile, checkConfigPermissions } from './config';
 import VanApiClient, { DEFAULT_LOGIN_URL } from './client';
@@ -2334,19 +2334,63 @@ bulkImportCmd
 
 const changedEntityExportCmd = program
   .command('changed-entity-exports')
-  .description('Manage changed entity export jobs');
+  .description('Export records that changed in a time window (changed entity export jobs)');
 
 changedEntityExportCmd
-  .command('list')
-  .description('List changed entity export jobs')
-  .option('--status <status>', 'Job status filter')
-  .option('--top <count>', 'Number of results', val => parseInt(val, 10), 50)
-  .option('--skip <count>', 'Number of results to skip', val => parseInt(val, 10), 0)
-  .action(async (options) => {
+  .command('resources')
+  .description('List the resource types available to your API key (use one as --resourceType)')
+  .addHelpText('after', `
+Examples:
+  $ van changed-entity-exports resources --pretty`)
+  .action(async () => {
     try {
       const api = createChangedEntityExportJobs(lazyClient);
-      const jobs = await api.list(options);
-      outputResult(jobs, program.opts());
+      outputResult(await api.listResources(), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+changedEntityExportCmd
+  .command('fields <resourceType>')
+  .description('List the fields a resource type can export (non-core fields must be named in --requestedFields)')
+  .addHelpText('after', `
+Examples:
+  $ van changed-entity-exports fields Contacts --fields fieldName,fieldType,isCoreField`)
+  .action(async (resourceType) => {
+    try {
+      const api = createChangedEntityExportJobs(lazyClient);
+      outputResult(await api.listFields(resourceType), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+changedEntityExportCmd
+  .command('change-types <resourceType>')
+  .description('List the change types (e.g. CreatedOrUpdated, Merged) an export of a resource type can report')
+  .addHelpText('after', `
+Examples:
+  $ van changed-entity-exports change-types Contacts --pretty`)
+  .action(async (resourceType) => {
+    try {
+      const api = createChangedEntityExportJobs(lazyClient);
+      outputResult(await api.listChangeTypes(resourceType), program.opts());
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+changedEntityExportCmd
+  .command('get <exportJobId>')
+  .description('Get an export job by ID, including its jobStatus and, once Complete, its download files (there is no list endpoint)')
+  .addHelpText('after', `
+Examples:
+  $ van changed-entity-exports get 98765 --fields exportJobId,jobStatus,files`)
+  .action(async (exportJobId) => {
+    try {
+      const api = createChangedEntityExportJobs(lazyClient);
+      outputResult(await api.get(exportJobId), program.opts());
     } catch (error) {
       handleError(error);
     }
@@ -2354,23 +2398,30 @@ changedEntityExportCmd
 
 changedEntityExportCmd
   .command('create')
-  .description('Create a changed entity export job')
-  .requiredOption('-f, --dateChangedFrom <date>', 'Start date for changes (YYYY-MM-DD)')
-  .option('-t, --dateChangedTo <date>', 'End date for changes (YYYY-MM-DD)')
-  .option('-w, --webhookUrl <url>', 'Webhook URL for completion notification')
+  .description('Create a changed entity export job. The export runs in the background; poll "get" until jobStatus is Complete or Error.')
+  .requiredOption('-r, --resourceType <type>', 'Resource type to export (see: van changed-entity-exports resources)')
+  .requiredOption('-f, --dateChangedFrom <timestamp>', 'Start of the window: YYYY-MM-DD or YYYY-MM-DDThh:mm:ssZ (or a +/-hh:mm offset)')
+  .option('-t, --dateChangedTo <timestamp>', 'End of the window, at most 90 days after --dateChangedFrom (default: now)')
+  .option('--requestedIds <ids>', 'Comma-separated record IDs to export; overrides the window and --includeInactive')
+  .option('--requestedFields <names>', 'Comma-separated non-core field names to include (see: van changed-entity-exports fields <resourceType>)')
+  .option('--requestedCustomFieldIds <ids>', 'Comma-separated custom field IDs to include')
+  .option('--requestedActivistCodeIds <ids>', 'Comma-separated activist code IDs to filter by (ContactsActivistCodes only)')
+  .option('--excludeChangesFromUserIds <ids>', 'Comma-separated user IDs whose changes are skipped (max 20)')
+  .option('--excludeChangesFromSelf', 'Skip changes made by your API user')
+  .option('--includeInactive', 'Include inactive records, e.g. deleted contacts or archived activist codes')
+  .option('--contactMode <mode>', '1/Person, 2/Organization or 3/PersonOrOrganization (default)')
+  .option('--savedListId <id>', 'Limit the export to people in this saved list')
+  .option('--fileSizeKbLimit <kb>', 'Maximum size of each CSV file in KB, 1000-100000 (default: 40000)')
+  .addHelpText('after', `
+Examples:
+  $ van changed-entity-exports create --resourceType Contacts --dateChangedFrom 2026-10-01
+  $ van changed-entity-exports create --resourceType Contacts --dateChangedFrom 2026-10-01T00:00:00Z --dateChangedTo 2026-10-31T00:00:00Z --requestedFields Prefix,DateCreated --contactMode Person`)
   .action(async (options) => {
     try {
       const globalOpts = program.opts();
       const merged = mergeJsonOption(options, globalOpts);
-      const data: Record<string, unknown> = {
-        dateChangedFrom: validateDate(merged.dateChangedFrom as string, 'dateChangedFrom')
-      };
-
-      if (merged.dateChangedTo) data.dateChangedTo = validateDate(merged.dateChangedTo as string, 'dateChangedTo');
-      if (merged.webhookUrl) data.webhookUrl = validateWebhookUrl(merged.webhookUrl as string, 'webhookUrl');
-
       const api = createChangedEntityExportJobs(lazyClient);
-      const job = await api.create(data);
+      const job = await api.create(merged);
       outputResult(job, globalOpts);
     } catch (error) {
       handleError(error);
