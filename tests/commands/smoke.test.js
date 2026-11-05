@@ -177,6 +177,9 @@ describe('command module wiring tests', () => {
     const base = { resourceType: 'Contacts' };
     await expect(changed.create({ ...base, dateChangedFrom: '10/01/2026' })).rejects.toThrow(/dateChangedFrom must be a date/);
     await expect(changed.create({ ...base, dateChangedFrom: '2026-02-30T25:00:00Z' })).rejects.toThrow(/dateChangedFrom must be a date/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-02-30' })).rejects.toThrow(/dateChangedFrom must be a date/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-02-30T00:00:00Z' })).rejects.toThrow(/dateChangedFrom must be a date/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-01-01', dateChangedTo: '2026-04-31' })).rejects.toThrow(/dateChangedTo must be a date/);
     await expect(changed.create({ ...base, dateChangedFrom: '2026-02-01', dateChangedTo: '2026-02-01' })).rejects.toThrow(/must be after/);
     await expect(changed.create({ ...base, dateChangedFrom: '2026-01-01', dateChangedTo: '2026-04-02' })).rejects.toThrow(/90 days or less/);
     await expect(changed.create({ ...base, dateChangedFrom: '2026-01-01', dateChangedTo: '2999-01-01' })).rejects.toThrow(/future/);
@@ -190,6 +193,8 @@ describe('command module wiring tests', () => {
     await expect(changed.create({ ...base, fileSizeKbLimit: 999 })).rejects.toThrow(/fileSizeKbLimit must be an integer between 1000 and 100000/);
     await expect(changed.create({ ...base, contactMode: 4 })).rejects.toThrow(/contactMode/);
     await expect(changed.create({ ...base, contactMode: 'People' })).rejects.toThrow(/contactMode/);
+    await expect(changed.create({ ...base, contactMode: 'toString' })).rejects.toThrow(/contactMode/);
+    await expect(changed.create({ ...base, contactMode: 'constructor' })).rejects.toThrow(/contactMode/);
     await expect(changed.create({ ...base, requestedFields: 'Prefix,,DateCreated' })).rejects.toThrow(/requestedFields/);
     await expect(changed.create({ ...base, requestedIds: '1,x' })).rejects.toThrow(/requestedIds/);
     await expect(changed.create({ ...base, includeInactive: 'yes' })).rejects.toThrow(/includeInactive/);

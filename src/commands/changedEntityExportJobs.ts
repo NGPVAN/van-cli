@@ -24,9 +24,16 @@ const ID_LIST_FIELDS = ['requestedIds', 'requestedCustomFieldIds', 'requestedAct
 // YYYY-MM-DD, optionally followed by a time and a Z or +/-hh:mm offset.
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
 
+// Date.parse rolls impossible days over (2026-02-30 becomes March 2), so check the calendar date too.
+function isCalendarDate(text: string): boolean {
+  const [year, month, day] = text.slice(0, 10).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 function validateTimestamp(value: unknown, label: string): { value: string; time: number } {
   const text = typeof value === 'string' ? value.trim() : '';
-  const time = TIMESTAMP_PATTERN.test(text) ? Date.parse(text) : NaN;
+  const time = TIMESTAMP_PATTERN.test(text) && isCalendarDate(text) ? Date.parse(text) : NaN;
   if (Number.isNaN(time)) {
     throw new VanValidationError(
       `${label} must be a date (YYYY-MM-DD) or timestamp (YYYY-MM-DDThh:mm:ssZ or with a +/-hh:mm offset), got: "${value}"`
@@ -54,7 +61,9 @@ function validateNameList(value: unknown, label: string): string[] {
 }
 
 function validateContactMode(value: unknown): number {
-  if (typeof value === 'string' && value.trim() in CONTACT_MODES) return CONTACT_MODES[value.trim()];
+  if (typeof value === 'string' && Object.prototype.hasOwnProperty.call(CONTACT_MODES, value.trim())) {
+    return CONTACT_MODES[value.trim()];
+  }
   return validateIntRange(value, 'contactMode', 1, 3);
 }
 
