@@ -6,7 +6,7 @@ A CLI wrapper for the NGP VAN API.
 
 ## Requirements
 
-- Node.js 24+ (current Active LTS; Node.js 20 reached EOL on 2026-04-30)
+- Node.js 24.22.1+ (current Active LTS; Node.js 20 reached EOL on 2026-04-30). 24.22.1 is the minimum for security reasons: earlier 24.x releases are missing the October 2026 Node.js security fixes, so upgrade if you are on one.
 - `VAN_API_KEY` environment variable, or a profile in `./.van/config` or `~/.van/config`
 - Optional `VAN_APP_NAME` (defaults to `default_user`)
 
