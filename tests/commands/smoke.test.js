@@ -43,7 +43,7 @@ describe('command module wiring tests', () => {
     await createStories(client).create({ vanId: 1, title: 'Story', storyText: 'story', storyStatusId: 1 });
     await createTargetedEmails(client).list({ top: 10, skip: 0 });
     await createBulkImport(client).createJob({ name: 'Import 1', importType: 'People', mappings: { firstName: 'First Name' } });
-    await createChangedEntityExportJobs(client).create({ dateChangedFrom: '2026-01-01' });
+    await createChangedEntityExportJobs(client).create({ resourceType: 'Contacts', dateChangedFrom: '2026-01-01' });
     await createLocations(client).list({ name: 'Boston' });
     await createSupporterGroups(client).create({ name: 'Core Team' });
 
@@ -116,6 +116,91 @@ describe('command module wiring tests', () => {
 
     expect(job).toEqual({ exportJobId: 6, status: 'Completed', downloadUrl: 'https://dl', exportJobGuid: 'g' });
     expect(Object.keys(job)).toEqual(['exportJobId', 'status', 'downloadUrl', 'exportJobGuid']);
+  });
+
+  it('changed-entity-exports lookups and get call the documented paths', async () => {
+    const changed = createChangedEntityExportJobs(client);
+    await changed.listResources();
+    await changed.listFields(' Contacts ');
+    await changed.listChangeTypes('Contacts/Activist Codes');
+    await changed.get('9');
+
+    expect(client.get).toHaveBeenNthCalledWith(1, '/changedEntityExportJobs/resources');
+    expect(client.get).toHaveBeenNthCalledWith(2, '/changedEntityExportJobs/fields/Contacts');
+    expect(client.get).toHaveBeenNthCalledWith(3, '/changedEntityExportJobs/changeTypes/Contacts%2FActivist%20Codes');
+    expect(client.get).toHaveBeenNthCalledWith(4, '/changedEntityExportJobs/9');
+  });
+
+  it('changed-entity-exports create sends only resourceType and dateChangedFrom when nothing else is given', async () => {
+    await createChangedEntityExportJobs(client).create({ resourceType: 'Contacts', dateChangedFrom: '2026-01-01' });
+
+    expect(client.post).toHaveBeenCalledWith('/changedEntityExportJobs', { resourceType: 'Contacts', dateChangedFrom: '2026-01-01' });
+  });
+
+  it('changed-entity-exports create normalizes every option and sends only known input properties', async () => {
+    await createChangedEntityExportJobs(client).create({
+      resourceType: 'ContactsActivistCodes',
+      dateChangedFrom: '2026-09-01T00:00:00Z',
+      dateChangedTo: '2026-10-01T12:30:00-04:00',
+      requestedIds: '1, 2,3',
+      requestedFields: ' Prefix,DateCreated ',
+      requestedCustomFieldIds: [7],
+      requestedActivistCodeIds: '44,45',
+      excludeChangesFromUserIds: '501',
+      excludeChangesFromSelf: true,
+      includeInactive: 'false',
+      contactMode: 'Person',
+      savedListId: '12',
+      fileSizeKbLimit: '5000',
+      exportJobId: 1, jobStatus: 'Complete', files: [], webhookUrl: 'https://example.com/hook',
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/changedEntityExportJobs', {
+      resourceType: 'ContactsActivistCodes',
+      dateChangedFrom: '2026-09-01T00:00:00Z',
+      dateChangedTo: '2026-10-01T12:30:00-04:00',
+      requestedIds: [1, 2, 3],
+      requestedFields: ['Prefix', 'DateCreated'],
+      requestedCustomFieldIds: [7],
+      requestedActivistCodeIds: [44, 45],
+      excludeChangesFromUserIds: [501],
+      excludeChangesFromSelf: true,
+      includeInactive: false,
+      contactMode: 1,
+      savedListId: 12,
+      fileSizeKbLimit: 5000,
+    });
+  });
+
+  it('changed-entity-exports create rejects windows VAN would reject', async () => {
+    const changed = createChangedEntityExportJobs(client);
+    const base = { resourceType: 'Contacts' };
+    await expect(changed.create({ ...base, dateChangedFrom: '10/01/2026' })).rejects.toThrow(/dateChangedFrom must be a date/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-02-30T25:00:00Z' })).rejects.toThrow(/dateChangedFrom must be a date/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-02-30' })).rejects.toThrow(/dateChangedFrom must be a date/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-02-30T00:00:00Z' })).rejects.toThrow(/dateChangedFrom must be a date/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-01-01', dateChangedTo: '2026-04-31' })).rejects.toThrow(/dateChangedTo must be a date/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-02-01', dateChangedTo: '2026-02-01' })).rejects.toThrow(/must be after/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-01-01', dateChangedTo: '2026-04-02' })).rejects.toThrow(/90 days or less/);
+    await expect(changed.create({ ...base, dateChangedFrom: '2026-01-01', dateChangedTo: '2999-01-01' })).rejects.toThrow(/future/);
+    await changed.create({ ...base, dateChangedFrom: '2026-01-01', dateChangedTo: '2026-04-01' });
+    expect(client.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('changed-entity-exports create validates option ranges before sending', async () => {
+    const changed = createChangedEntityExportJobs(client);
+    const base = { resourceType: 'Contacts', dateChangedFrom: '2026-01-01' };
+    await expect(changed.create({ ...base, fileSizeKbLimit: 999 })).rejects.toThrow(/fileSizeKbLimit must be an integer between 1000 and 100000/);
+    await expect(changed.create({ ...base, contactMode: 4 })).rejects.toThrow(/contactMode/);
+    await expect(changed.create({ ...base, contactMode: 'People' })).rejects.toThrow(/contactMode/);
+    await expect(changed.create({ ...base, contactMode: 'toString' })).rejects.toThrow(/contactMode/);
+    await expect(changed.create({ ...base, contactMode: 'constructor' })).rejects.toThrow(/contactMode/);
+    await expect(changed.create({ ...base, requestedFields: 'Prefix,,DateCreated' })).rejects.toThrow(/requestedFields/);
+    await expect(changed.create({ ...base, requestedIds: '1,x' })).rejects.toThrow(/requestedIds/);
+    await expect(changed.create({ ...base, includeInactive: 'yes' })).rejects.toThrow(/includeInactive/);
+    const tooManyUsers = Array.from({ length: 21 }, (_, i) => i + 1).join(',');
+    await expect(changed.create({ ...base, excludeChangesFromUserIds: tooManyUsers })).rejects.toThrow(/at most 20/);
+    expect(client.post).not.toHaveBeenCalled();
   });
 
   it('maps saved-lists list filters to /savedLists query params', async () => {
